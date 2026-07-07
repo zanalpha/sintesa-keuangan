@@ -71,18 +71,16 @@ async function boot() {
       state.user = status.user;
       await enterApp();
     } else {
-      showAuth(status.hasUsers);
+      showAuth();
     }
   } catch (e) {
-    showAuth(true);
+    showAuth();
   }
 }
 
-function showAuth(hasUsers) {
+function showAuth() {
   $('app-view').classList.add('hidden');
   $('auth-view').classList.remove('hidden');
-  $('login-form').classList.toggle('hidden', !hasUsers);
-  $('register-form').classList.toggle('hidden', hasUsers);
 }
 
 $('login-form').addEventListener('submit', async (e) => {
@@ -97,21 +95,6 @@ $('login-form').addEventListener('submit', async (e) => {
     await enterApp();
   } catch (err) {
     $('login-error').textContent = err.message;
-  }
-});
-
-$('register-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const f = e.target;
-  $('register-error').textContent = '';
-  try {
-    const { user } = await api('POST', '/api/auth/register', {
-      name: f.name.value, username: f.username.value, password: f.password.value,
-    });
-    state.user = user;
-    await enterApp();
-  } catch (err) {
-    $('register-error').textContent = err.message;
   }
 });
 
