@@ -221,6 +221,9 @@ h1, h2, h3 { font-family: var(--serif); }
 .icon-btn { border: 0; background: none; cursor: pointer; padding: 4px 6px; border-radius: 6px; font-size: 14px; line-height: 1; color: var(--muted); }
 .icon-btn:hover { background: var(--raise); color: var(--ink); }
 .empty-row td { text-align: center; color: var(--muted-2); padding: 22px; font-style: italic; }
+/* Catatan: nominal berwarna sesuai jenis (masuk hijau, keluar merah) */
+#tbody-masuk .c-amt, #foot-masuk { color: var(--in); }
+#tbody-keluar .c-amt, #foot-keluar { color: var(--out); }
 .besar-table .c-amt { width: 118px; }
 .besar-table .r-saldo { font-weight: 700; color: var(--teal); }
 .besar-table .r-in { color: var(--in); } .besar-table .r-out { color: var(--out); }
