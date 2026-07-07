@@ -14,6 +14,7 @@ Dibuat untuk **PT Sintesa Data Semesta**.
   - **Buku Besar** — daftar kronologis dengan **Saldo Berjalan** dan filter rentang tanggal (dari–sampai).
   - **Analitik** — grafik pemasukan vs pengeluaran per bulan, saldo berjalan, rincian per kategori, kartu statistik.
 - Tambah / ubah / hapus transaksi (tanggal, jumlah, keterangan, kategori dengan saran otomatis).
+- **Bukti transaksi (opsional)** — lampirkan foto struk/nota/transfer atau PDF; gambar otomatis dikompres di browser, baris bertanda 📎, bisa dilihat & diunduh. Blob disimpan di DB dan hanya diambil saat dilihat (daftar tetap ringan).
 - **Pencarian** keterangan, filter per bulan.
 - **Impor CSV** (migrasi dari spreadsheet lama) & **Ekspor CSV**.
 - **Cetak** laporan formal berkop PT (periode, tanggal cetak, kolom tanda tangan).

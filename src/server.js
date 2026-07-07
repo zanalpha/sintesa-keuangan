@@ -33,7 +33,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: '512kb' }));
+app.use(express.json({ limit: '8mb' })); // besar untuk menampung bukti (gambar) yang sudah dikompres
 
 const secret = process.env.SESSION_SECRET;
 if (isProd && (!secret || secret.length < 16)) {

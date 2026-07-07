@@ -93,6 +93,7 @@ async function migrate() {
   // Kolom tambahan (dijalankan setelah tabel ada; aman diulang di pg & pg-mem).
   await addColumn('books', "saldo_awal BIGINT NOT NULL DEFAULT 0", 'saldo_awal');
   await addColumn('books', "bank_info TEXT NOT NULL DEFAULT ''", 'bank_info');
+  await addColumn('transactions', 'bukti TEXT', 'bukti'); // data URL gambar/pdf, boleh kosong
 }
 
 /** Menambah kolom secara idempoten, kompatibel Postgres & pg-mem. */

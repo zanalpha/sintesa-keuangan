@@ -150,7 +150,9 @@ router.get('/books/:id/transactions', async (req, res, next) => {
     const id = Number(req.params.id);
     if (!(await bookExists(id))) return res.status(404).json({ error: 'Buku tidak ditemukan.' });
 
-    let sql = `SELECT id, type, tanggal, jumlah, keterangan, kategori
+    // Catatan: kolom "bukti" (blob) TIDAK diambil di daftar agar respons tetap ringan;
+    // hanya penanda has_bukti. Blob diambil terpisah lewat /transactions/:id/bukti.
+    let sql = `SELECT id, type, tanggal, jumlah, keterangan, kategori, (bukti IS NOT NULL) AS has_bukti
                  FROM transactions WHERE book_id = $1`;
     const params = [id];
 
@@ -170,6 +172,7 @@ router.get('/books/:id/transactions', async (req, res, next) => {
       jumlah: num(r.jumlah),
       keterangan: r.keterangan,
       kategori: r.kategori,
+      has_bukti: !!r.has_bukti,
     }));
     res.json({ transactions });
   } catch (e) {
@@ -207,6 +210,16 @@ function readTxBody(body) {
   return { type, tanggal, jumlah, keterangan, kategori };
 }
 
+const BUKTI_MAX = 4_000_000; // ~3MB biner setelah base64
+// Validasi bukti: null/'' -> hapus; data URL gambar/pdf -> simpan.
+function normBukti(v) {
+  if (v === null || v === '' || v === undefined) return { ok: true, value: null };
+  if (typeof v !== 'string') return { ok: false };
+  if (!/^data:(image\/(png|jpe?g|webp|gif)|application\/pdf);base64,/.test(v)) return { ok: false };
+  if (v.length > BUKTI_MAX) return { ok: false, tooBig: true };
+  return { ok: true, value: v };
+}
+
 router.post('/books/:id/transactions', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
@@ -216,15 +229,17 @@ router.post('/books/:id/transactions', async (req, res, next) => {
     if (!type) return res.status(400).json({ error: 'Jenis harus "masuk" atau "keluar".' });
     if (!validDate(tanggal)) return res.status(400).json({ error: 'Tanggal tidak valid.' });
     if (jumlah === null) return res.status(400).json({ error: 'Jumlah tidak valid.' });
+    const nb = normBukti(req.body.bukti);
+    if (!nb.ok) return res.status(400).json({ error: nb.tooBig ? 'Ukuran bukti terlalu besar (maks ~3MB).' : 'Format bukti tidak didukung (gambar/PDF).' });
 
     const { rows } = await query(
-      `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, type, tanggal, jumlah, keterangan, kategori`,
-      [id, type, tanggal, jumlah, keterangan, kategori, req.session.userId]
+      `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, bukti, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, type, tanggal, jumlah, keterangan, kategori, (bukti IS NOT NULL) AS has_bukti`,
+      [id, type, tanggal, jumlah, keterangan, kategori, nb.value, req.session.userId]
     );
     const t = rows[0];
-    res.status(201).json({ transaction: { ...t, jumlah: num(t.jumlah) } });
+    res.status(201).json({ transaction: { ...t, jumlah: num(t.jumlah), has_bukti: !!t.has_bukti } });
   } catch (e) {
     next(e);
   }
@@ -270,15 +285,37 @@ router.patch('/transactions/:id', async (req, res, next) => {
     if (!validDate(tanggal)) return res.status(400).json({ error: 'Tanggal tidak valid.' });
     if (jumlah === null) return res.status(400).json({ error: 'Jumlah tidak valid.' });
 
+    const sets = ['type=$1', 'tanggal=$2', 'jumlah=$3', 'keterangan=$4', 'kategori=$5'];
+    const params = [type, tanggal, jumlah, keterangan, kategori];
+    // "bukti" hanya diubah bila field ini disertakan (biar edit biasa tak menimpa bukti lama).
+    if (Object.prototype.hasOwnProperty.call(req.body, 'bukti')) {
+      const nb = normBukti(req.body.bukti);
+      if (!nb.ok) return res.status(400).json({ error: nb.tooBig ? 'Ukuran bukti terlalu besar (maks ~3MB).' : 'Format bukti tidak didukung (gambar/PDF).' });
+      params.push(nb.value);
+      sets.push('bukti=$' + params.length);
+    }
+    params.push(id);
     const { rows } = await query(
-      `UPDATE transactions SET type=$1, tanggal=$2, jumlah=$3, keterangan=$4, kategori=$5
-        WHERE id=$6
-        RETURNING id, type, tanggal, jumlah, keterangan, kategori`,
-      [type, tanggal, jumlah, keterangan, kategori, id]
+      `UPDATE transactions SET ${sets.join(', ')} WHERE id=$${params.length}
+        RETURNING id, type, tanggal, jumlah, keterangan, kategori, (bukti IS NOT NULL) AS has_bukti`,
+      params
     );
     if (!rows.length) return res.status(404).json({ error: 'Transaksi tidak ditemukan.' });
     const t = rows[0];
-    res.json({ transaction: { ...t, jumlah: num(t.jumlah) } });
+    res.json({ transaction: { ...t, jumlah: num(t.jumlah), has_bukti: !!t.has_bukti } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Ambil isi bukti (blob) satu transaksi — dipanggil hanya saat dilihat.
+router.get('/transactions/:id/bukti', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const { rows } = await query('SELECT bukti FROM transactions WHERE id = $1', [id]);
+    if (!rows.length) return res.status(404).json({ error: 'Transaksi tidak ditemukan.' });
+    if (!rows[0].bukti) return res.status(404).json({ error: 'Tidak ada bukti untuk transaksi ini.' });
+    res.json({ bukti: rows[0].bukti });
   } catch (e) {
     next(e);
   }

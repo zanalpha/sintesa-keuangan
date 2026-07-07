@@ -214,6 +214,16 @@
           <label>Jumlah (Rp)<input name="jumlah" inputmode="numeric" autocomplete="off" placeholder="0" required /></label>
           <label>Keterangan<input name="keterangan" maxlength="500" placeholder="mis. Pembayaran Domain Web" /></label>
           <label>Kategori (opsional)<input name="kategori" maxlength="100" list="kategori-list" placeholder="mis. Operasional" /><datalist id="kategori-list"></datalist></label>
+          <label>Bukti (opsional) — foto struk/nota/transfer atau PDF
+            <input id="bukti-file" type="file" accept="image/*,application/pdf" />
+          </label>
+          <div id="bukti-status" class="bukti-status hidden">
+            <span id="bukti-info" class="bukti-info"></span>
+            <span class="bukti-actions">
+              <button type="button" id="bukti-view" class="btn btn-ghost btn-sm">Lihat</button>
+              <button type="button" id="bukti-remove" class="btn btn-ghost btn-sm">Hapus</button>
+            </span>
+          </div>
           <p class="form-error" id="tx-error"></p>
           <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary" id="tx-submit">Simpan</button></div>
         </form>
@@ -249,6 +259,18 @@
         <p class="form-error" id="import-error"></p>
         <p class="import-result" id="import-result"></p>
         <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Tutup</button></div>
+      </div>
+    </div>
+
+    <!-- ======================= MODAL PENAMPIL BUKTI ======================= -->
+    <div id="bukti-modal" class="modal hidden">
+      <div class="modal-box bukti-box">
+        <h3>Bukti Transaksi</h3>
+        <div id="bukti-view-area" class="bukti-view-area"></div>
+        <div class="modal-actions">
+          <a id="bukti-download" class="btn btn-ghost" download>⬇ Unduh</a>
+          <button type="button" id="bukti-close" class="btn btn-primary">Tutup</button>
+        </div>
       </div>
     </div>
 

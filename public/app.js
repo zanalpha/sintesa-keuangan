@@ -228,7 +228,7 @@ function renderColumn(type, list) {
         <td class="c-no">${i + 1}</td>
         <td class="c-date">${tanggalIndo(t.tanggal)}</td>
         <td class="c-amt">${rupiah(t.jumlah)}</td>
-        <td>${escapeHtml(t.keterangan) || '<span class="muted">—</span>'}${t.kategori ? ` <span class="muted">· ${escapeHtml(t.kategori)}</span>` : ''}</td>
+        <td>${escapeHtml(t.keterangan) || '<span class="muted">—</span>'}${t.kategori ? ` <span class="muted">· ${escapeHtml(t.kategori)}</span>` : ''}${t.has_bukti ? ` <button type="button" class="bukti-chip" data-bukti="${t.id}" title="Lihat bukti">📎 bukti</button>` : ''}</td>
         <td class="c-act"><div class="row-actions">
           <button class="icon-btn" title="Ubah" data-edit="${t.id}">✎</button>
           <button class="icon-btn" title="Hapus" data-del="${t.id}">🗑</button>
@@ -266,7 +266,7 @@ function computeBesar() {
     if (to && t.tanggal > to) continue;
     running += t.type === 'masuk' ? t.jumlah : -t.jumlah;
     if (t.type === 'masuk') tMasuk += t.jumlah; else tKeluar += t.jumlah;
-    rows.push({ tanggal: t.tanggal, keterangan: t.keterangan, kategori: t.kategori,
+    rows.push({ id: t.id, has_bukti: t.has_bukti, tanggal: t.tanggal, keterangan: t.keterangan, kategori: t.kategori,
       masuk: t.type === 'masuk' ? t.jumlah : 0, keluar: t.type === 'keluar' ? t.jumlah : 0, saldo: running });
   }
   return { saldoAwal, opening, rows, tMasuk, tKeluar, saldoAkhir: running, from, to };
@@ -281,7 +281,8 @@ function renderBukuBesar() {
     html += `<tr class="empty-row"><td colspan="6">Belum ada transaksi pada rentang ini</td></tr>`;
   } else {
     d.rows.forEach((r, i) => {
-      const ket = escapeHtml(r.keterangan) + (r.kategori ? ` <span class="muted">· ${escapeHtml(r.kategori)}</span>` : '');
+      const ket = escapeHtml(r.keterangan) + (r.kategori ? ` <span class="muted">· ${escapeHtml(r.kategori)}</span>` : '')
+        + (r.has_bukti ? ` <button type="button" class="bukti-chip" data-bukti="${r.id}" title="Lihat bukti">📎</button>` : '');
       html += `<tr>
         <td class="c-no">${i + 1}</td>
         <td class="c-date">${tanggalIndo(r.tanggal)}</td>
@@ -312,24 +313,120 @@ function setView(view) {
 }
 
 // ============================================================
+//  BUKTI (lampiran) — kompres di browser, simpan sebagai data URL
+// ============================================================
+let buktiState = { data: null, changed: false, hasExisting: false, txId: null };
+
+function fileToDataURL(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = () => rej(new Error('Gagal membaca file.'));
+    r.readAsDataURL(file);
+  });
+}
+function loadImage(src) {
+  return new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = () => rej(new Error('Gagal memuat gambar.'));
+    i.src = src;
+  });
+}
+async function processBukti(file) {
+  if (file.type === 'application/pdf') {
+    if (file.size > 2_500_000) throw new Error('PDF terlalu besar (maks ~2,5MB).');
+    return fileToDataURL(file);
+  }
+  if (!file.type.startsWith('image/')) throw new Error('Format tidak didukung. Pilih gambar atau PDF.');
+  const img = await loadImage(await fileToDataURL(file));
+  const maxDim = 1600;
+  let { width, height } = img;
+  if (Math.max(width, height) > maxDim) {
+    const s = maxDim / Math.max(width, height);
+    width = Math.round(width * s); height = Math.round(height * s);
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+  let out = canvas.toDataURL('image/jpeg', 0.72);
+  if (out.length > 2_800_000) out = canvas.toDataURL('image/jpeg', 0.5); // turunkan bila masih besar
+  return out;
+}
+function updateBuktiStatus() {
+  const info = $('bukti-info');
+  if (buktiState.data) {
+    info.textContent = `📎 Bukti baru dipilih (~${Math.round((buktiState.data.length * 0.75) / 1024)} KB)`;
+    $('bukti-status').classList.remove('hidden');
+  } else if (buktiState.hasExisting) {
+    info.textContent = '📎 Bukti terlampir';
+    $('bukti-status').classList.remove('hidden');
+  } else {
+    $('bukti-status').classList.add('hidden');
+  }
+}
+function showBukti(dataUrl) {
+  const area = $('bukti-view-area'), dl = $('bukti-download');
+  dl.href = dataUrl;
+  if (dataUrl.startsWith('data:application/pdf')) {
+    dl.download = 'bukti.pdf';
+    area.innerHTML = `<p class="muted">Bukti berupa dokumen PDF. Klik "Unduh" untuk membukanya.</p>`;
+  } else {
+    dl.download = 'bukti.jpg';
+    area.innerHTML = `<img src="${dataUrl}" alt="Bukti transaksi" class="bukti-img" />`;
+  }
+  $('bukti-modal').classList.remove('hidden');
+}
+async function openBukti(id) {
+  try {
+    const { bukti } = await api('GET', `/api/transactions/${id}/bukti`);
+    showBukti(bukti);
+  } catch (err) { toast(err.message, true); }
+}
+function closeBukti() { $('bukti-modal').classList.add('hidden'); }
+
+// ============================================================
 //  MODAL TRANSAKSI
 // ============================================================
 function openTxModal(type, tx) {
   const f = $('tx-form');
   f.reset();
   $('tx-error').textContent = '';
+  $('bukti-file').value = '';
   f.type.value = type;
   f.id.value = tx ? tx.id : '';
   f.tanggal.value = tx ? tx.tanggal : todayISO();
   f.jumlah.value = tx ? new Intl.NumberFormat('id-ID').format(tx.jumlah) : '';
   f.keterangan.value = tx ? tx.keterangan : '';
   f.kategori.value = tx ? tx.kategori : '';
+  buktiState = { data: null, changed: false, hasExisting: !!(tx && tx.has_bukti), txId: tx ? tx.id : null };
+  updateBuktiStatus();
   const label = type === 'masuk' ? 'Pemasukan' : 'Pengeluaran';
   $('tx-modal-title').textContent = (tx ? 'Ubah ' : 'Tambah ') + label;
   $('tx-submit').textContent = tx ? 'Simpan Perubahan' : 'Simpan';
   $('tx-modal').classList.remove('hidden');
   setTimeout(() => f.jumlah.focus(), 50);
 }
+$('bukti-file').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  $('tx-error').textContent = '';
+  try {
+    buktiState.data = await processBukti(file);
+    buktiState.changed = true;
+    updateBuktiStatus();
+  } catch (err) { e.target.value = ''; $('tx-error').textContent = err.message; }
+});
+$('bukti-view').addEventListener('click', () => {
+  if (buktiState.data) showBukti(buktiState.data);
+  else if (buktiState.hasExisting && buktiState.txId) openBukti(buktiState.txId);
+});
+$('bukti-remove').addEventListener('click', () => {
+  buktiState.data = null; buktiState.changed = true; buktiState.hasExisting = false;
+  $('bukti-file').value = '';
+  updateBuktiStatus();
+  toast('Bukti akan dihapus saat disimpan.');
+});
 $('tx-form').jumlah.addEventListener('input', formatMoneyInput);
 $('tx-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -341,6 +438,8 @@ $('tx-form').addEventListener('submit', async (e) => {
     keterangan: f.keterangan.value, kategori: f.kategori.value,
   };
   if (!payload.jumlah) { $('tx-error').textContent = 'Jumlah wajib diisi.'; return; }
+  // Sertakan "bukti" hanya bila diubah (data URL baru, atau null bila dihapus).
+  if (buktiState.changed) payload.bukti = buktiState.data;
   try {
     if (f.id.value) { await api('PATCH', `/api/transactions/${f.id.value}`, payload); toast('Transaksi diperbarui.'); }
     else { await api('POST', `/api/books/${state.bookId}/transactions`, payload); toast('Transaksi ditambahkan.'); }
@@ -608,7 +707,8 @@ function wireStaticHandlers() {
     btn.addEventListener('click', () => openTxModal(btn.dataset.add)));
 
   $('ledger-view').addEventListener('click', async (e) => {
-    const editId = e.target.dataset.edit, delId = e.target.dataset.del;
+    const buktiId = e.target.dataset.bukti, editId = e.target.dataset.edit, delId = e.target.dataset.del;
+    if (buktiId) { openBukti(Number(buktiId)); return; }
     if (editId) {
       const tx = state.transactions.find((t) => t.id === Number(editId));
       if (tx) openTxModal(tx.type, tx);
@@ -617,6 +717,9 @@ function wireStaticHandlers() {
       try { await api('DELETE', `/api/transactions/${delId}`); toast('Transaksi dihapus.'); await loadTransactions(); }
       catch (err) { toast(err.message, true); }
     }
+  });
+  $('besar-view').addEventListener('click', (e) => {
+    if (e.target.dataset.bukti) openBukti(Number(e.target.dataset.bukti));
   });
 
   document.querySelectorAll('.vt-btn').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
@@ -654,13 +757,21 @@ function wireStaticHandlers() {
   $('print-btn').addEventListener('click', () => window.print());
 
   document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeModals));
+  // Penampil bukti punya tombol tutup sendiri agar tak menutup modal transaksi di baliknya.
+  $('bukti-close').addEventListener('click', closeBukti);
   document.querySelectorAll('.modal').forEach((m) =>
-    m.addEventListener('click', (e) => { if (e.target === m) closeModals(); }));
+    m.addEventListener('click', (e) => {
+      if (e.target !== m) return;
+      if (m.id === 'bukti-modal') closeBukti(); else closeModals();
+    }));
   document.addEventListener('click', () => closeMenu());
 
   // Pintasan keyboard: Esc tutup; "n" transaksi baru; "/" fokus pencarian.
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { closeModals(); closeMenu(); return; }
+    if (e.key === 'Escape') {
+      if (!$('bukti-modal').classList.contains('hidden')) { closeBukti(); return; }
+      closeModals(); closeMenu(); return;
+    }
     const tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
     if ([...document.querySelectorAll('.modal')].some((m) => !m.classList.contains('hidden'))) return;
