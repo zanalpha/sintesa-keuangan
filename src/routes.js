@@ -12,8 +12,10 @@ const num = (v) => Number(v); // BIGINT dikembalikan sebagai string oleh pg -> j
 
 function parseAmount(v) {
   // Terima angka atau string angka (rupiah bulat, tanpa desimal).
-  const n = Math.round(Number(String(v).replace(/[^\d-]/g, '')));
-  if (!Number.isFinite(n) || n < 0 || n > 1e15) return null;
+  const cleaned = String(v == null ? '' : v).replace(/[^\d-]/g, '');
+  if (cleaned === '' || cleaned === '-') return null; // kosong/bukan angka -> tolak
+  const n = Number(cleaned);
+  if (!Number.isInteger(n) || n < 0 || n > 1e15) return null;
   return n;
 }
 
@@ -42,20 +44,22 @@ async function bookExists(id) {
 router.get('/books', async (req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT b.id, b.name,
+      `SELECT b.id, b.name, b.saldo_awal, b.bank_info,
               COALESCE(SUM(CASE WHEN t.type = 'masuk'  THEN t.jumlah END), 0) AS masuk,
               COALESCE(SUM(CASE WHEN t.type = 'keluar' THEN t.jumlah END), 0) AS keluar
          FROM books b
          LEFT JOIN transactions t ON t.book_id = b.id
-        GROUP BY b.id, b.name
+        GROUP BY b.id, b.name, b.saldo_awal, b.bank_info
         ORDER BY b.id`
     );
     const books = rows.map((r) => ({
       id: r.id,
       name: r.name,
+      saldo_awal: num(r.saldo_awal),
+      bank_info: r.bank_info || '',
       masuk: num(r.masuk),
       keluar: num(r.keluar),
-      sisa: num(r.masuk) - num(r.keluar),
+      sisa: num(r.saldo_awal) + num(r.masuk) - num(r.keluar),
     }));
     res.json({ books });
   } catch (e) {
@@ -63,16 +67,30 @@ router.get('/books', async (req, res, next) => {
   }
 });
 
+function readBookBody(body) {
+  const name = String(body.name || '').trim();
+  const rawSaldo = body.saldo_awal;
+  // Saldo awal boleh kosong -> dianggap 0.
+  const saldo_awal =
+    rawSaldo == null || String(rawSaldo).trim() === '' ? 0 : parseAmount(rawSaldo);
+  const bank_info = String(body.bank_info || '').trim().slice(0, 200);
+  return { name, saldo_awal, bank_info };
+}
+
 router.post('/books', async (req, res, next) => {
   try {
-    const name = String(req.body.name || '').trim();
+    const { name, saldo_awal, bank_info } = readBookBody(req.body);
     if (name.length < 1 || name.length > 100)
       return res.status(400).json({ error: 'Nama buku 1-100 karakter.' });
+    if (saldo_awal === null) return res.status(400).json({ error: 'Saldo awal tidak valid.' });
     const { rows } = await query(
-      'INSERT INTO books (name, created_by) VALUES ($1, $2) RETURNING id, name',
-      [name, req.session.userId]
+      'INSERT INTO books (name, saldo_awal, bank_info, created_by) VALUES ($1, $2, $3, $4) RETURNING id, name, saldo_awal, bank_info',
+      [name, saldo_awal, bank_info, req.session.userId]
     );
-    res.status(201).json({ book: { ...rows[0], masuk: 0, keluar: 0, sisa: 0 } });
+    const b = rows[0];
+    res.status(201).json({
+      book: { id: b.id, name: b.name, saldo_awal: num(b.saldo_awal), bank_info: b.bank_info || '', masuk: 0, keluar: 0, sisa: num(b.saldo_awal) },
+    });
   } catch (e) {
     next(e);
   }
@@ -81,15 +99,17 @@ router.post('/books', async (req, res, next) => {
 router.patch('/books/:id', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const name = String(req.body.name || '').trim();
+    const { name, saldo_awal, bank_info } = readBookBody(req.body);
     if (name.length < 1 || name.length > 100)
       return res.status(400).json({ error: 'Nama buku 1-100 karakter.' });
+    if (saldo_awal === null) return res.status(400).json({ error: 'Saldo awal tidak valid.' });
     const { rows } = await query(
-      'UPDATE books SET name = $1 WHERE id = $2 RETURNING id, name',
-      [name, id]
+      'UPDATE books SET name = $1, saldo_awal = $2, bank_info = $3 WHERE id = $4 RETURNING id, name, saldo_awal, bank_info',
+      [name, saldo_awal, bank_info, id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Buku tidak ditemukan.' });
-    res.json({ book: rows[0] });
+    const b = rows[0];
+    res.json({ book: { id: b.id, name: b.name, saldo_awal: num(b.saldo_awal), bank_info: b.bank_info || '' } });
   } catch (e) {
     next(e);
   }
@@ -153,9 +173,11 @@ router.get('/books/:id/summary', async (req, res, next) => {
          FROM transactions WHERE book_id = $1`,
       [id]
     );
+    const bk = await query('SELECT saldo_awal FROM books WHERE id = $1', [id]);
+    const saldoAwal = num(bk.rows[0] ? bk.rows[0].saldo_awal : 0);
     const masuk = num(rows[0].masuk);
     const keluar = num(rows[0].keluar);
-    res.json({ masuk, keluar, sisa: masuk - keluar });
+    res.json({ saldo_awal: saldoAwal, masuk, keluar, sisa: saldoAwal + masuk - keluar });
   } catch (e) {
     next(e);
   }
@@ -188,6 +210,38 @@ router.post('/books/:id/transactions', async (req, res, next) => {
     );
     const t = rows[0];
     res.status(201).json({ transaction: { ...t, jumlah: num(t.jumlah) } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Import massal (mis. dari file CSV spreadsheet lama).
+router.post('/books/:id/transactions/bulk', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!(await bookExists(id))) return res.status(404).json({ error: 'Buku tidak ditemukan.' });
+
+    const items = Array.isArray(req.body.transactions) ? req.body.transactions : null;
+    if (!items) return res.status(400).json({ error: 'Data transaksi tidak valid.' });
+    if (items.length === 0) return res.status(400).json({ error: 'Tidak ada baris untuk diimpor.' });
+    if (items.length > 5000) return res.status(400).json({ error: 'Maksimal 5000 baris per impor.' });
+
+    let inserted = 0;
+    const errors = [];
+    for (let i = 0; i < items.length; i++) {
+      const { type, tanggal, jumlah, keterangan, kategori } = readTxBody(items[i]);
+      if (!type || !validDate(tanggal) || jumlah === null) {
+        errors.push({ baris: i + 1, alasan: 'jenis/tanggal/jumlah tidak valid' });
+        continue;
+      }
+      await query(
+        `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [id, type, tanggal, jumlah, keterangan, kategori, req.session.userId]
+      );
+      inserted++;
+    }
+    res.status(201).json({ inserted, gagal: errors.length, errors: errors.slice(0, 20) });
   } catch (e) {
     next(e);
   }

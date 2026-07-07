@@ -3,21 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Buku Kas — PT Sintesa Data Semesta</title>
-    <meta name="description" content="Pencatatan pemasukan & pengeluaran usaha PT Sintesa Data Semesta." />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐙</text></svg>" />
+    <title>Sistem Pencatatan Keuangan — PT Sintesa Data Semesta</title>
+    <meta name="description" content="Sistem pencatatan pemasukan & pengeluaran PT Sintesa Data Semesta." />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%230f2c4d'/><text x='50' y='68' font-size='52' font-family='Georgia,serif' font-weight='bold' fill='%23c8a04e' text-anchor='middle'>S</text></svg>" />
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <!-- ======================= LAYAR LOGIN / DAFTAR ======================= -->
+    <!-- ======================= LAYAR LOGIN ======================= -->
     <section id="auth-view" class="auth-view hidden">
       <div class="auth-card">
         <div class="auth-brand">
-          <span class="logo">🐙</span>
-          <h1>Buku Kas Sintesa</h1>
-          <p>Pencatatan pemasukan &amp; pengeluaran usaha</p>
+          <span class="brand-mark">SDS</span>
+          <h1>PT Sintesa Data Semesta</h1>
+          <p>Sistem Pencatatan Keuangan</p>
         </div>
-
         <form id="login-form" class="auth-form">
           <h2>Masuk</h2>
           <label>Username<input name="username" autocomplete="username" required /></label>
@@ -26,15 +25,18 @@
           <button type="submit" class="btn btn-primary btn-block">Masuk</button>
         </form>
       </div>
-      <p class="auth-footer">© <span id="year"></span> PT Sintesa Data Semesta</p>
+      <p class="auth-footer">© <span id="year"></span> PT Sintesa Data Semesta · Rahasia &amp; Terenkripsi</p>
     </section>
 
-    <!-- ======================= APLIKASI UTAMA ======================= -->
+    <!-- ======================= APLIKASI ======================= -->
     <div id="app-view" class="hidden">
       <header class="topbar">
         <div class="topbar-left">
-          <span class="logo">🐙</span>
-          <strong class="brand-name">Buku Kas Sintesa</strong>
+          <span class="brand-mark sm">SDS</span>
+          <div class="brand-text">
+            <strong>PT Sintesa Data Semesta</strong>
+            <span>Sistem Pencatatan Keuangan</span>
+          </div>
         </div>
         <div class="topbar-right">
           <label class="book-picker">
@@ -43,9 +45,9 @@
           </label>
           <button id="new-book-btn" class="btn btn-ghost" title="Buku kas baru">＋ Buku</button>
           <div class="menu">
-            <button id="menu-btn" class="btn btn-ghost">☰</button>
+            <button id="menu-btn" class="btn btn-ghost" aria-label="Menu">☰</button>
             <div id="menu-dropdown" class="menu-dropdown hidden">
-              <button id="rename-book-btn">✎ Ganti nama buku</button>
+              <button id="settings-book-btn">⚙ Pengaturan buku</button>
               <button id="delete-book-btn" class="danger">🗑 Hapus buku ini</button>
               <hr />
               <button id="users-btn">👥 Kelola pengguna</button>
@@ -58,7 +60,10 @@
       </header>
 
       <main class="container">
-        <!-- Kartu ringkasan -->
+        <!-- Info buku -->
+        <section class="book-info" id="book-info"></section>
+
+        <!-- Ringkasan -->
         <section class="cards">
           <div class="card card-in">
             <span class="card-label">Total Pemasukan</span>
@@ -69,109 +74,113 @@
             <span class="card-value" id="sum-keluar">Rp0</span>
           </div>
           <div class="card card-balance">
-            <span class="card-label">Sisa Anggaran</span>
+            <span class="card-label">Saldo Akhir</span>
             <span class="card-value" id="sum-sisa">Rp0</span>
           </div>
         </section>
 
-        <!-- Alat: pindah tampilan, filter bulan, export, cetak -->
+        <!-- Toolbar -->
         <section class="toolbar">
-          <div class="toolbar-left">
-            <div class="view-toggle" role="tablist" aria-label="Tampilan">
-              <button type="button" class="vt-btn active" data-view="catatan" role="tab">📒 Catatan</button>
-              <button type="button" class="vt-btn" data-view="analitik" role="tab">📊 Analitik</button>
-            </div>
-            <div class="ledger-tools" id="ledger-tools">
-              <label class="field-inline">
-                <span>Bulan</span>
-                <select id="month-filter"><option value="">Semua bulan</option></select>
-              </label>
-              <span class="tx-count" id="tx-count"></span>
-            </div>
+          <div class="view-toggle" role="tablist" aria-label="Tampilan">
+            <button type="button" class="vt-btn active" data-view="catatan" role="tab">Catatan</button>
+            <button type="button" class="vt-btn" data-view="besar" role="tab">Buku Besar</button>
+            <button type="button" class="vt-btn" data-view="analitik" role="tab">Analitik</button>
           </div>
+
+          <div class="tool-filters" id="tools-catatan">
+            <label class="field-inline">
+              <span>Bulan</span>
+              <select id="month-filter"><option value="">Semua</option></select>
+            </label>
+            <label class="field-inline search">
+              <span class="sr-only">Cari</span>
+              <input id="search-input" type="search" placeholder="Cari keterangan…" autocomplete="off" />
+            </label>
+          </div>
+
+          <div class="tool-filters hidden" id="tools-besar">
+            <label class="field-inline"><span>Dari</span><input id="besar-from" type="date" /></label>
+            <label class="field-inline"><span>Sampai</span><input id="besar-to" type="date" /></label>
+            <button id="besar-reset" class="btn btn-ghost btn-sm">Semua</button>
+          </div>
+
           <div class="toolbar-right">
-            <button id="export-btn" class="btn btn-ghost">⬇ Export CSV</button>
+            <button id="import-btn" class="btn btn-ghost">⬆ Impor</button>
+            <button id="export-btn" class="btn btn-ghost">⬇ Ekspor</button>
             <button id="print-btn" class="btn btn-ghost">🖨 Cetak</button>
           </div>
         </section>
 
-        <!-- Dua kolom seperti spreadsheet -->
+        <!-- ===== CATATAN (dua kolom) ===== -->
         <section class="ledger" id="ledger-view">
           <div class="ledger-col">
             <div class="ledger-head ledger-head-in">
               <h2>PEMASUKAN</h2>
-              <button class="btn btn-in" data-add="masuk">＋ Tambah</button>
+              <button class="btn btn-in btn-sm" data-add="masuk">＋ Tambah</button>
             </div>
             <div class="table-wrap">
               <table class="tx-table">
-                <thead>
-                  <tr><th class="c-no">No</th><th class="c-date">Tanggal</th><th class="c-amt">Jumlah</th><th>Keterangan</th><th class="c-act"></th></tr>
-                </thead>
+                <thead><tr><th class="c-no">No</th><th class="c-date">Tanggal</th><th class="c-amt">Jumlah</th><th>Keterangan</th><th class="c-act"></th></tr></thead>
                 <tbody id="tbody-masuk"></tbody>
-                <tfoot>
-                  <tr><td colspan="2">TOTAL</td><td class="c-amt" id="foot-masuk">Rp0</td><td colspan="2"></td></tr>
-                </tfoot>
+                <tfoot><tr><td colspan="2">TOTAL</td><td class="c-amt" id="foot-masuk">Rp0</td><td colspan="2"></td></tr></tfoot>
               </table>
             </div>
           </div>
-
           <div class="ledger-col">
             <div class="ledger-head ledger-head-out">
               <h2>PENGELUARAN</h2>
-              <button class="btn btn-out" data-add="keluar">＋ Tambah</button>
+              <button class="btn btn-out btn-sm" data-add="keluar">＋ Tambah</button>
             </div>
             <div class="table-wrap">
               <table class="tx-table">
-                <thead>
-                  <tr><th class="c-no">No</th><th class="c-date">Tanggal</th><th class="c-amt">Jumlah</th><th>Keterangan</th><th class="c-act"></th></tr>
-                </thead>
+                <thead><tr><th class="c-no">No</th><th class="c-date">Tanggal</th><th class="c-amt">Jumlah</th><th>Keterangan</th><th class="c-act"></th></tr></thead>
                 <tbody id="tbody-keluar"></tbody>
-                <tfoot>
-                  <tr><td colspan="2">TOTAL</td><td class="c-amt" id="foot-keluar">Rp0</td><td colspan="2"></td></tr>
-                </tfoot>
+                <tfoot><tr><td colspan="2">TOTAL</td><td class="c-amt" id="foot-keluar">Rp0</td><td colspan="2"></td></tr></tfoot>
               </table>
             </div>
           </div>
         </section>
 
-        <!-- ======================= ANALITIK ======================= -->
+        <!-- ===== BUKU BESAR (saldo berjalan) ===== -->
+        <section class="besar hidden" id="besar-view">
+          <div class="panel">
+            <div class="panel-head"><h2>Buku Besar — Saldo Berjalan</h2><span id="besar-range" class="muted"></span></div>
+            <div class="table-wrap">
+              <table class="tx-table besar-table">
+                <thead><tr>
+                  <th class="c-no">No</th><th class="c-date">Tanggal</th><th>Keterangan</th>
+                  <th class="c-amt">Masuk</th><th class="c-amt">Keluar</th><th class="c-amt">Saldo</th>
+                </tr></thead>
+                <tbody id="tbody-besar"></tbody>
+                <tfoot><tr><td colspan="3">SALDO AKHIR</td><td class="c-amt" id="besar-tmasuk"></td><td class="c-amt" id="besar-tkeluar"></td><td class="c-amt" id="besar-saldo"></td></tr></tfoot>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== ANALITIK ===== -->
         <section class="analytics hidden" id="analytics-view">
           <div class="stat-tiles" id="stat-tiles"></div>
-
           <div class="chart-card">
-            <div class="chart-head">
-              <h3>Pemasukan vs Pengeluaran per Bulan</h3>
-              <div class="legend">
-                <span class="lg lg-in">Pemasukan</span>
-                <span class="lg lg-out">Pengeluaran</span>
-              </div>
+            <div class="chart-head"><h3>Pemasukan vs Pengeluaran per Bulan</h3>
+              <div class="legend"><span class="lg lg-in">Pemasukan</span><span class="lg lg-out">Pengeluaran</span></div>
             </div>
             <div class="chart-scroll"><div id="chart-monthly" class="chart"></div></div>
           </div>
-
           <div class="chart-card">
-            <div class="chart-head">
-              <h3>Saldo Berjalan (akumulasi sisa)</h3>
-              <div class="legend"><span class="lg lg-bal">Saldo</span></div>
-            </div>
+            <div class="chart-head"><h3>Saldo Berjalan (akumulasi)</h3><div class="legend"><span class="lg lg-bal">Saldo</span></div></div>
             <div class="chart-scroll"><div id="chart-balance" class="chart"></div></div>
           </div>
-
           <div class="chart-grid">
-            <div class="chart-card">
-              <h3>Pengeluaran per Kategori</h3>
-              <div id="breakdown-keluar" class="breakdown"></div>
-            </div>
-            <div class="chart-card">
-              <h3>Pemasukan per Kategori</h3>
-              <div id="breakdown-masuk" class="breakdown"></div>
-            </div>
+            <div class="chart-card"><h3>Pengeluaran per Kategori</h3><div id="breakdown-keluar" class="breakdown"></div></div>
+            <div class="chart-card"><h3>Pemasukan per Kategori</h3><div id="breakdown-masuk" class="breakdown"></div></div>
           </div>
-
-          <p class="analytics-empty hidden" id="analytics-empty">Belum ada data untuk dianalisis. Tambahkan transaksi terlebih dahulu.</p>
+          <p class="analytics-empty hidden" id="analytics-empty">Belum ada data untuk dianalisis.</p>
         </section>
 
-        <p class="print-only print-title"></p>
+        <!-- Header/footer khusus cetak -->
+        <div class="print-only" id="print-head"></div>
+        <div class="print-only" id="print-foot"></div>
       </main>
     </div>
 
@@ -180,18 +189,46 @@
       <div class="modal-box">
         <h3 id="tx-modal-title">Tambah Transaksi</h3>
         <form id="tx-form">
-          <input type="hidden" name="id" />
-          <input type="hidden" name="type" />
+          <input type="hidden" name="id" /><input type="hidden" name="type" />
           <label>Tanggal<input name="tanggal" type="date" required /></label>
           <label>Jumlah (Rp)<input name="jumlah" inputmode="numeric" autocomplete="off" placeholder="0" required /></label>
           <label>Keterangan<input name="keterangan" maxlength="500" placeholder="mis. Pembayaran Domain Web" /></label>
-          <label>Kategori (opsional)<input name="kategori" maxlength="100" placeholder="mis. Operasional" /></label>
+          <label>Kategori (opsional)<input name="kategori" maxlength="100" list="kategori-list" placeholder="mis. Operasional" /><datalist id="kategori-list"></datalist></label>
           <p class="form-error" id="tx-error"></p>
-          <div class="modal-actions">
-            <button type="button" class="btn btn-ghost" data-close>Batal</button>
-            <button type="submit" class="btn btn-primary" id="tx-submit">Simpan</button>
-          </div>
+          <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary" id="tx-submit">Simpan</button></div>
         </form>
+      </div>
+    </div>
+
+    <!-- ======================= MODAL PENGATURAN BUKU ======================= -->
+    <div id="book-modal" class="modal hidden">
+      <div class="modal-box">
+        <h3 id="book-modal-title">Pengaturan Buku</h3>
+        <form id="book-form">
+          <input type="hidden" name="id" />
+          <label>Nama Buku<input name="name" maxlength="100" required placeholder="mis. Kas Utama" /></label>
+          <label>Saldo Awal (Rp)<input name="saldo_awal" inputmode="numeric" autocomplete="off" placeholder="0" /></label>
+          <label>Info Rekening / Bank<input name="bank_info" maxlength="200" placeholder="mis. BANK BCA 0562593452" /></label>
+          <p class="form-error" id="book-error"></p>
+          <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary">Simpan</button></div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ======================= MODAL IMPOR ======================= -->
+    <div id="import-modal" class="modal hidden">
+      <div class="modal-box">
+        <h3>Impor dari CSV</h3>
+        <p class="muted">Unggah file CSV dengan kolom: <strong>Jenis, Tanggal, Jumlah, Keterangan, Kategori</strong>.
+          Jenis diisi <em>Pemasukan</em>/<em>Pengeluaran</em> (atau masuk/keluar). Tanggal format <em>YYYY-MM-DD</em>.</p>
+        <p><button type="button" id="template-btn" class="btn btn-ghost btn-sm">⬇ Unduh template</button></p>
+        <label class="file-drop">
+          <input id="import-file" type="file" accept=".csv,text/csv" />
+          <span>Pilih file CSV…</span>
+        </label>
+        <p class="form-error" id="import-error"></p>
+        <p class="import-result" id="import-result"></p>
+        <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Tutup</button></div>
       </div>
     </div>
 
@@ -206,16 +243,12 @@
           <label>Username<input name="username" required /></label>
           <label>Password<input name="password" type="password" required placeholder="minimal 6 karakter" /></label>
           <p class="form-error" id="add-user-error"></p>
-          <div class="modal-actions">
-            <button type="button" class="btn btn-ghost" data-close>Tutup</button>
-            <button type="submit" class="btn btn-primary">Tambah</button>
-          </div>
+          <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Tutup</button><button type="submit" class="btn btn-primary">Tambah</button></div>
         </form>
       </div>
     </div>
 
     <div id="toast" class="toast hidden"></div>
-
     <script src="/app.js"></script>
   </body>
 </html>

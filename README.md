@@ -7,13 +7,17 @@ Dibuat untuk **PT Sintesa Data Semesta**.
 
 ## Fitur
 
-- Login akun (aman, password di-hash dengan bcrypt).
-- Banyak **Buku Kas** (mis. per grup / per proyek, seperti tab di spreadsheet).
-- Dua kolom **Pemasukan / Pengeluaran** + total & **Sisa Anggaran** otomatis.
-- Tambah / ubah / hapus transaksi (tanggal, jumlah, keterangan, kategori).
-- Filter per bulan, **Export CSV** (buka di Excel), dan **Cetak**.
-- Kelola pengguna (tambah staf yang boleh mengakses).
-- Tampilan responsif — nyaman di HP maupun desktop.
+- Login akun (aman, password di-hash dengan bcrypt). Registrasi publik dimatikan; akun ditambah oleh admin lewat **Kelola Pengguna**.
+- Banyak **Buku Kas** dengan **Saldo Awal** dan **Info Rekening/Bank** per buku.
+- Tiga tampilan:
+  - **Catatan** — dua kolom Pemasukan / Pengeluaran, total, dan **Saldo Akhir** otomatis.
+  - **Buku Besar** — daftar kronologis dengan **Saldo Berjalan** dan filter rentang tanggal (dari–sampai).
+  - **Analitik** — grafik pemasukan vs pengeluaran per bulan, saldo berjalan, rincian per kategori, kartu statistik.
+- Tambah / ubah / hapus transaksi (tanggal, jumlah, keterangan, kategori dengan saran otomatis).
+- **Pencarian** keterangan, filter per bulan.
+- **Impor CSV** (migrasi dari spreadsheet lama) & **Ekspor CSV**.
+- **Cetak** laporan formal berkop PT (periode, tanggal cetak, kolom tanda tangan).
+- Tampilan formal/korporat, responsif — nyaman di HP maupun desktop.
 
 ## Teknologi
 

@@ -89,6 +89,30 @@ async function migrate() {
     `CREATE INDEX IF NOT EXISTS idx_tx_book ON transactions(book_id)`,
     `CREATE INDEX IF NOT EXISTS idx_tx_tanggal ON transactions(tanggal)`,
   ]);
+
+  // Kolom tambahan (dijalankan setelah tabel ada; aman diulang di pg & pg-mem).
+  await addColumn('books', "saldo_awal BIGINT NOT NULL DEFAULT 0", 'saldo_awal');
+  await addColumn('books', "bank_info TEXT NOT NULL DEFAULT ''", 'bank_info');
+}
+
+/** Menambah kolom secara idempoten, kompatibel Postgres & pg-mem. */
+async function addColumn(table, coldef, colname) {
+  try {
+    await query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${coldef}`);
+    return; // Postgres modern
+  } catch (_) {
+    /* pg-mem mungkin tak mendukung IF NOT EXISTS -> lanjut fallback */
+  }
+  try {
+    await query(`SELECT ${colname} FROM ${table} LIMIT 1`);
+    return; // kolom sudah ada
+  } catch (_) {
+    try {
+      await query(`ALTER TABLE ${table} ADD COLUMN ${coldef}`);
+    } catch (_) {
+      /* abaikan jika balapan/duplikat */
+    }
+  }
 }
 
 function isMemory() {
