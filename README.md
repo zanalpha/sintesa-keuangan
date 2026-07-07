@@ -1,0 +1,110 @@
+# Buku Kas Sintesa 🐙
+
+Aplikasi web untuk mencatat **pemasukan** dan **pengeluaran** usaha — pengganti Google Sheet,
+tapi bisa diakses dari HP & laptop mana saja, dengan login.
+
+Dibuat untuk **PT Sintesa Data Semesta**.
+
+## Fitur
+
+- Login akun (aman, password di-hash dengan bcrypt).
+- Banyak **Buku Kas** (mis. per grup / per proyek, seperti tab di spreadsheet).
+- Dua kolom **Pemasukan / Pengeluaran** + total & **Sisa Anggaran** otomatis.
+- Tambah / ubah / hapus transaksi (tanggal, jumlah, keterangan, kategori).
+- Filter per bulan, **Export CSV** (buka di Excel), dan **Cetak**.
+- Kelola pengguna (tambah staf yang boleh mengakses).
+- Tampilan responsif — nyaman di HP maupun desktop.
+
+## Teknologi
+
+- Backend: Node.js + Express
+- Database: PostgreSQL (`pg`)
+- Login: cookie-session + bcryptjs
+- Frontend: HTML/CSS/JavaScript murni (tanpa proses build)
+
+---
+
+## Menjalankan di komputer (lokal)
+
+```bash
+npm install
+npm start
+```
+
+Buka http://localhost:3000
+
+> Tanpa `DATABASE_URL`, aplikasi memakai database **sementara di memori** —
+> cocok untuk mencoba, tapi **data hilang** saat server dimatikan.
+> Untuk data permanen, isi `DATABASE_URL` (lihat di bawah) atau langsung deploy ke Render.
+
+---
+
+## Deploy ke Render (rekomendasi) — GRATIS
+
+Aplikasi ini sudah menyertakan `render.yaml`, jadi Render otomatis membuat
+web service + database Postgres yang saling tersambung.
+
+### Langkah
+
+1. **Naikkan kode ke GitHub** (lihat bagian bawah).
+2. Buka https://dashboard.render.com → **New +** → **Blueprint**.
+3. Hubungkan akun GitHub, pilih repo **sintesa-keuangan**.
+4. Render membaca `render.yaml` → klik **Apply**. Render akan membuat:
+   - Database `sintesa-keuangan-db` (Postgres)
+   - Web service `sintesa-keuangan` (Node) — `DATABASE_URL` & `SESSION_SECRET` terisi otomatis.
+5. Tunggu 2–3 menit sampai status **Live**. Buka URL `https://sintesa-keuangan.onrender.com`.
+6. **Buat akun pertama** di layar yang muncul → langsung bisa mencatat.
+
+> Catatan paket gratis:
+> - Web service gratis "tidur" saat tidak dipakai; akses pertama butuh ±30 detik untuk bangun.
+>   Naikkan ke paket **Starter** agar selalu aktif.
+> - Postgres gratis Render **kedaluwarsa** setelah beberapa waktu. Untuk pemakaian serius,
+>   ubah `plan: free` → `plan: basic` di `render.yaml`.
+
+### Pakai domain sendiri (opsional)
+
+Punya domain `sintesadatasemesta.com`? Bisa pasang subdomain, mis. `kas.sintesadatasemesta.com`:
+Render → service → **Settings → Custom Domains → Add** → ikuti instruksi CNAME di panel DNS Hostinger.
+
+---
+
+## Menaikkan kode ke GitHub
+
+```bash
+cd sintesa-keuangan
+git init
+git add .
+git commit -m "Aplikasi Buku Kas Sintesa"
+git branch -M main
+# buat repo kosong di github.com dulu, lalu:
+git remote add origin https://github.com/USERNAME/sintesa-keuangan.git
+git push -u origin main
+```
+
+Setiap kali ada perubahan: `git add . && git commit -m "..." && git push` →
+Render otomatis deploy ulang.
+
+---
+
+## Variabel lingkungan (Environment Variables)
+
+| Nama             | Wajib?         | Keterangan |
+|------------------|----------------|------------|
+| `DATABASE_URL`   | Ya (produksi)  | Koneksi Postgres. Otomatis terisi oleh `render.yaml`. |
+| `SESSION_SECRET` | Ya (produksi)  | Kunci acak pengaman sesi. Otomatis dibuat oleh Render. |
+| `PORT`           | Tidak          | Diisi otomatis oleh Render. Default `3000` saat lokal. |
+
+---
+
+## Backup data
+
+Karena data ada di Postgres, backup = dump database (Render menyediakan backup pada paket berbayar).
+Untuk salinan cepat: gunakan tombol **Export CSV** di aplikasi untuk tiap buku/bulan.
+
+## Keamanan
+
+- Password disimpan sebagai hash bcrypt (tidak pernah plaintext).
+- Sesi login lewat cookie httpOnly + `secure` di produksi.
+- Registrasi terbuka **hanya** untuk akun pertama; setelahnya penambahan user
+  harus lewat pengguna yang sudah login (menu **Kelola Pengguna**).
+- Ada pembatas percobaan login untuk mengurangi serangan tebak password.

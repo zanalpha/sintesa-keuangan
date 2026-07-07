@@ -1,0 +1,28 @@
+# Blueprint Render — sekali klik "New + > Blueprint" lalu arahkan ke repo ini.
+# Membuat: 1 web service (Node) + 1 database Postgres, sudah tersambung otomatis.
+
+databases:
+  - name: sintesa-keuangan-db
+    databaseName: sintesa_keuangan
+    user: sintesa
+    plan: free # ganti ke "basic" untuk produksi jangka panjang (free Postgres kedaluwarsa)
+    region: singapore # terdekat dari Indonesia
+
+services:
+  - type: web
+    name: sintesa-keuangan
+    runtime: node
+    plan: free # ganti ke "starter" agar tidak "tidur" saat tidak dipakai
+    region: singapore
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sintesa-keuangan-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true # Render membuat string acak aman otomatis
+      - key: NODE_ENV
+        value: production
