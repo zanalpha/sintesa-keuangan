@@ -84,14 +84,20 @@
           </div>
         </section>
 
-        <!-- Alat: filter bulan, export, cetak -->
+        <!-- Alat: pindah tampilan, filter bulan, export, cetak -->
         <section class="toolbar">
           <div class="toolbar-left">
-            <label class="field-inline">
-              <span>Bulan</span>
-              <select id="month-filter"><option value="">Semua bulan</option></select>
-            </label>
-            <span class="tx-count" id="tx-count"></span>
+            <div class="view-toggle" role="tablist" aria-label="Tampilan">
+              <button type="button" class="vt-btn active" data-view="catatan" role="tab">📒 Catatan</button>
+              <button type="button" class="vt-btn" data-view="analitik" role="tab">📊 Analitik</button>
+            </div>
+            <div class="ledger-tools" id="ledger-tools">
+              <label class="field-inline">
+                <span>Bulan</span>
+                <select id="month-filter"><option value="">Semua bulan</option></select>
+              </label>
+              <span class="tx-count" id="tx-count"></span>
+            </div>
           </div>
           <div class="toolbar-right">
             <button id="export-btn" class="btn btn-ghost">⬇ Export CSV</button>
@@ -100,7 +106,7 @@
         </section>
 
         <!-- Dua kolom seperti spreadsheet -->
-        <section class="ledger">
+        <section class="ledger" id="ledger-view">
           <div class="ledger-col">
             <div class="ledger-head ledger-head-in">
               <h2>PEMASUKAN</h2>
@@ -137,6 +143,44 @@
             </div>
           </div>
         </section>
+
+        <!-- ======================= ANALITIK ======================= -->
+        <section class="analytics hidden" id="analytics-view">
+          <div class="stat-tiles" id="stat-tiles"></div>
+
+          <div class="chart-card">
+            <div class="chart-head">
+              <h3>Pemasukan vs Pengeluaran per Bulan</h3>
+              <div class="legend">
+                <span class="lg lg-in">Pemasukan</span>
+                <span class="lg lg-out">Pengeluaran</span>
+              </div>
+            </div>
+            <div class="chart-scroll"><div id="chart-monthly" class="chart"></div></div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-head">
+              <h3>Saldo Berjalan (akumulasi sisa)</h3>
+              <div class="legend"><span class="lg lg-bal">Saldo</span></div>
+            </div>
+            <div class="chart-scroll"><div id="chart-balance" class="chart"></div></div>
+          </div>
+
+          <div class="chart-grid">
+            <div class="chart-card">
+              <h3>Pengeluaran per Kategori</h3>
+              <div id="breakdown-keluar" class="breakdown"></div>
+            </div>
+            <div class="chart-card">
+              <h3>Pemasukan per Kategori</h3>
+              <div id="breakdown-masuk" class="breakdown"></div>
+            </div>
+          </div>
+
+          <p class="analytics-empty hidden" id="analytics-empty">Belum ada data untuk dianalisis. Tambahkan transaksi terlebih dahulu.</p>
+        </section>
+
         <p class="print-only print-title"></p>
       </main>
     </div>
