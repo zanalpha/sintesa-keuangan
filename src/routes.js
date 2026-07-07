@@ -39,6 +39,21 @@ async function bookExists(id) {
   return rows.length > 0;
 }
 
+// ---------- BACKUP ----------
+// Unduh seluruh data (semua buku + transaksi) sebagai JSON.
+router.get('/backup', async (req, res, next) => {
+  try {
+    const books = (await query('SELECT id, name, saldo_awal, bank_info, created_at FROM books ORDER BY id')).rows
+      .map((b) => ({ ...b, saldo_awal: num(b.saldo_awal) }));
+    const transactions = (await query(
+      'SELECT id, book_id, type, tanggal, jumlah, keterangan, kategori, created_at FROM transactions ORDER BY id'
+    )).rows.map((t) => ({ ...t, jumlah: num(t.jumlah) }));
+    res.json({ app: 'sintesa-keuangan', version: 1, books, transactions });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ---------- BUKU KAS ----------
 
 router.get('/books', async (req, res, next) => {

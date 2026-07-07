@@ -17,7 +17,23 @@ const isProd = process.env.NODE_ENV === 'production';
 app.disable('x-powered-by');
 app.set('trust proxy', 1); // penting di Render agar secure cookie & req.ip benar
 
-app.use(express.json({ limit: '256kb' }));
+// Header keamanan (setara helmet, tanpa dependensi).
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+      "img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'self'; " +
+      "form-action 'self'; frame-ancestors 'none'"
+  );
+  if (isProd) res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  next();
+});
+
+app.use(express.json({ limit: '512kb' }));
 
 const secret = process.env.SESSION_SECRET;
 if (isProd && (!secret || secret.length < 16)) {

@@ -17,7 +17,12 @@ Dibuat untuk **PT Sintesa Data Semesta**.
 - **Pencarian** keterangan, filter per bulan.
 - **Impor CSV** (migrasi dari spreadsheet lama) & **Ekspor CSV**.
 - **Cetak** laporan formal berkop PT (periode, tanggal cetak, kolom tanda tangan).
-- Tampilan formal/korporat, responsif — nyaman di HP maupun desktop.
+- **Perbandingan bulan ini vs bulan lalu** (naik/turun + persentase) di Analitik.
+- **Ganti password** sendiri, **cadangkan seluruh data** ke JSON, **kelola pengguna**.
+- Tampilan **"treasury console"** cyber-formal (navy + teal + emas, angka monospace) dengan **toggle terang/gelap**.
+- Pintasan keyboard: `N` transaksi baru, `/` fokus pencarian.
+- Keamanan: header CSP + anti-clickjacking, password bcrypt, query berparameter, sesi cookie httpOnly.
+- Responsif — nyaman di HP maupun desktop.
 
 ## Teknologi
 

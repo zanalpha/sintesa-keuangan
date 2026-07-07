@@ -44,6 +44,7 @@
             <select id="book-select"></select>
           </label>
           <button id="new-book-btn" class="btn btn-ghost" title="Buku kas baru">＋ Buku</button>
+          <button id="theme-btn" class="icon-toggle" title="Ganti tema terang/gelap" aria-label="Ganti tema">🌙</button>
           <div class="menu">
             <button id="menu-btn" class="btn btn-ghost" aria-label="Menu">☰</button>
             <div id="menu-dropdown" class="menu-dropdown hidden">
@@ -51,6 +52,8 @@
               <button id="delete-book-btn" class="danger">🗑 Hapus buku ini</button>
               <hr />
               <button id="users-btn">👥 Kelola pengguna</button>
+              <button id="password-btn">🔑 Ganti password</button>
+              <button id="backup-btn">💾 Cadangkan data (JSON)</button>
               <hr />
               <span class="menu-user" id="menu-user"></span>
               <button id="logout-btn">↩ Keluar</button>
@@ -59,21 +62,30 @@
         </div>
       </header>
 
+      <div class="statusrail">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="sr-live">SISTEM AKTIF</span>
+        <span class="sr-sep">|</span>
+        <span id="sr-clock">--:--:--</span>
+        <span class="sr-sep">|</span>
+        <span id="sr-user"></span>
+      </div>
+
       <main class="container">
         <!-- Info buku -->
         <section class="book-info" id="book-info"></section>
 
         <!-- Ringkasan -->
         <section class="cards">
-          <div class="card card-in">
+          <div class="card card-in tick">
             <span class="card-label">Total Pemasukan</span>
             <span class="card-value" id="sum-masuk">Rp0</span>
           </div>
-          <div class="card card-out">
+          <div class="card card-out tick">
             <span class="card-label">Total Pengeluaran</span>
             <span class="card-value" id="sum-keluar">Rp0</span>
           </div>
-          <div class="card card-balance">
+          <div class="card card-balance tick">
             <span class="card-label">Saldo Akhir</span>
             <span class="card-value" id="sum-sisa">Rp0</span>
           </div>
@@ -91,6 +103,10 @@
             <label class="field-inline">
               <span>Bulan</span>
               <select id="month-filter"><option value="">Semua</option></select>
+            </label>
+            <label class="field-inline">
+              <span>Kategori</span>
+              <select id="kategori-filter"><option value="">Semua</option></select>
             </label>
             <label class="field-inline search">
               <span class="sr-only">Cari</span>
@@ -160,6 +176,10 @@
 
         <!-- ===== ANALITIK ===== -->
         <section class="analytics hidden" id="analytics-view">
+          <div class="compare-wrap">
+            <h3>Bulan Ini vs Bulan Lalu</h3>
+            <div class="compare" id="compare"></div>
+          </div>
           <div class="stat-tiles" id="stat-tiles"></div>
           <div class="chart-card">
             <div class="chart-head"><h3>Pemasukan vs Pengeluaran per Bulan</h3>
@@ -229,6 +249,20 @@
         <p class="form-error" id="import-error"></p>
         <p class="import-result" id="import-result"></p>
         <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Tutup</button></div>
+      </div>
+    </div>
+
+    <!-- ======================= MODAL GANTI PASSWORD ======================= -->
+    <div id="password-modal" class="modal hidden">
+      <div class="modal-box">
+        <h3>Ganti Password</h3>
+        <form id="password-form">
+          <label>Password Lama<input name="current_password" type="password" autocomplete="current-password" required /></label>
+          <label>Password Baru<input name="new_password" type="password" autocomplete="new-password" required placeholder="minimal 6 karakter" /></label>
+          <label>Ulangi Password Baru<input name="confirm_password" type="password" autocomplete="new-password" required /></label>
+          <p class="form-error" id="password-error"></p>
+          <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary">Simpan</button></div>
+        </form>
       </div>
     </div>
 

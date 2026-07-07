@@ -158,6 +158,23 @@ router.post('/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// Ganti password sendiri.
+router.post('/password', requireAuth, async (req, res, next) => {
+  try {
+    const current = String(req.body.current_password || '');
+    const next_ = String(req.body.new_password || '');
+    if (next_.length < 6) return res.status(400).json({ error: 'Password baru minimal 6 karakter.' });
+    const { rows } = await query('SELECT password_hash FROM users WHERE id = $1', [req.session.userId]);
+    const ok = rows[0] && (await bcrypt.compare(current, rows[0].password_hash));
+    if (!ok) return res.status(401).json({ error: 'Password lama salah.' });
+    const hash = await bcrypt.hash(next_, 10);
+    await query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, req.session.userId]);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // Daftar pengguna (untuk halaman kelola pengguna).
 router.get('/users', requireAuth, async (req, res, next) => {
   try {

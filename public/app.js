@@ -61,11 +61,32 @@ const state = {
   bookId: null,
   transactions: [],
   month: '',
+  kategori: '',
   search: '',
   besarFrom: '',
   besarTo: '',
   view: 'catatan', // 'catatan' | 'besar' | 'analitik'
 };
+
+// ---------- Tema (gelap default = "cyber", terang opsional) ----------
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  const btn = $('theme-btn');
+  if (btn) btn.textContent = t === 'light' ? '☀️' : '🌙';
+  try { localStorage.setItem('sintesa_theme', t); } catch (_) {}
+}
+function initTheme() { applyTheme(localStorage.getItem('sintesa_theme') === 'light' ? 'light' : 'dark'); }
+function toggleTheme() {
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+}
+function startClock() {
+  const tick = () => {
+    const el = $('sr-clock');
+    if (el) el.textContent = new Date().toLocaleTimeString('id-ID', { hour12: false });
+  };
+  tick();
+  setInterval(tick, 1000);
+}
 const curBook = () => state.books.find((b) => b.id === state.bookId) || null;
 
 // ============================================================
@@ -73,6 +94,8 @@ const curBook = () => state.books.find((b) => b.id === state.bookId) || null;
 // ============================================================
 async function boot() {
   $('year').textContent = new Date().getFullYear();
+  initTheme();
+  startClock();
   wireStaticHandlers();
   try {
     const status = await api('GET', '/api/auth/status');
@@ -100,6 +123,7 @@ async function enterApp() {
   $('auth-view').classList.add('hidden');
   $('app-view').classList.remove('hidden');
   $('menu-user').textContent = 'Masuk sebagai ' + state.user.name;
+  $('sr-user').textContent = state.user.name.toUpperCase();
   await loadBooks();
 }
 
@@ -157,6 +181,7 @@ function visibleTx() {
   const q = state.search.trim().toLowerCase();
   return state.transactions.filter((t) => {
     if (state.month && t.tanggal.slice(0, 7) !== state.month) return false;
+    if (state.kategori && (t.kategori || '') !== state.kategori) return false;
     if (q && !((t.keterangan || '').toLowerCase().includes(q) || (t.kategori || '').toLowerCase().includes(q))) return false;
     return true;
   });
@@ -217,6 +242,12 @@ function renderColumn(type, list) {
 function updateKategoriList() {
   const cats = [...new Set(state.transactions.map((t) => t.kategori).filter(Boolean))].sort();
   $('kategori-list').innerHTML = cats.map((c) => `<option value="${escapeHtml(c)}">`).join('');
+  // Dropdown filter kategori (pertahankan pilihan bila masih ada)
+  const sel = $('kategori-filter');
+  const cur = state.kategori;
+  sel.innerHTML = '<option value="">Semua</option>' + cats.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  sel.value = cats.includes(cur) ? cur : '';
+  state.kategori = sel.value;
 }
 
 // ---------- Buku Besar (saldo berjalan) ----------
@@ -385,6 +416,39 @@ $('add-user-form').addEventListener('submit', async (e) => {
   } catch (err) { $('add-user-error').textContent = err.message; }
 });
 
+// ---------- Ganti password ----------
+function openPassword() {
+  closeMenu();
+  $('password-form').reset();
+  $('password-error').textContent = '';
+  $('password-modal').classList.remove('hidden');
+}
+$('password-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  $('password-error').textContent = '';
+  if (f.new_password.value !== f.confirm_password.value) {
+    $('password-error').textContent = 'Ulangi password baru tidak sama.';
+    return;
+  }
+  try {
+    await api('POST', '/api/auth/password', { current_password: f.current_password.value, new_password: f.new_password.value });
+    closeModals();
+    toast('Password berhasil diganti.');
+  } catch (err) { $('password-error').textContent = err.message; }
+});
+
+// ---------- Cadangkan data ----------
+async function backupData() {
+  closeMenu();
+  try {
+    const data = await api('GET', '/api/backup');
+    const stamp = todayISO();
+    downloadBlob(JSON.stringify(data, null, 2), `backup-sintesa-keuangan-${stamp}.json`, 'application/json');
+    toast('Cadangan data diunduh.');
+  } catch (err) { toast(err.message, true); }
+}
+
 // ============================================================
 //  IMPOR CSV
 // ============================================================
@@ -484,8 +548,8 @@ function downloadTemplate() {
 // ============================================================
 //  EKSPOR & CETAK
 // ============================================================
-function downloadBlob(content, filename) {
-  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+function downloadBlob(content, filename, mime) {
+  const blob = new Blob([content], { type: (mime || 'text/csv') + ';charset=utf-8;' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = filename;
@@ -536,7 +600,7 @@ function buildPrint(book, saldoAwal, totalMasuk, totalKeluar) {
 function toggleMenu() { $('menu-dropdown').classList.toggle('hidden'); }
 function closeMenu() { $('menu-dropdown').classList.add('hidden'); }
 function closeModals() {
-  ['tx-modal', 'book-modal', 'import-modal', 'users-modal'].forEach((id) => $(id).classList.add('hidden'));
+  ['tx-modal', 'book-modal', 'import-modal', 'users-modal', 'password-modal'].forEach((id) => $(id).classList.add('hidden'));
 }
 
 function wireStaticHandlers() {
@@ -559,11 +623,12 @@ function wireStaticHandlers() {
 
   $('book-select').addEventListener('change', (e) => {
     state.bookId = Number(e.target.value);
-    state.month = ''; state.search = ''; state.besarFrom = ''; state.besarTo = '';
+    state.month = ''; state.kategori = ''; state.search = ''; state.besarFrom = ''; state.besarTo = '';
     $('search-input').value = ''; $('besar-from').value = ''; $('besar-to').value = '';
     loadTransactions();
   });
   $('month-filter').addEventListener('change', (e) => { state.month = e.target.value; render(); });
+  $('kategori-filter').addEventListener('change', (e) => { state.kategori = e.target.value; render(); });
   $('search-input').addEventListener('input', (e) => { state.search = e.target.value; render(); });
   $('besar-from').addEventListener('change', (e) => { state.besarFrom = e.target.value; render(); });
   $('besar-to').addEventListener('change', (e) => { state.besarTo = e.target.value; render(); });
@@ -574,10 +639,13 @@ function wireStaticHandlers() {
   });
 
   $('new-book-btn').addEventListener('click', () => openBookModal(null));
+  $('theme-btn').addEventListener('click', toggleTheme);
   $('menu-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
   $('settings-book-btn').addEventListener('click', () => { closeMenu(); openBookModal(curBook()); });
   $('delete-book-btn').addEventListener('click', () => { closeMenu(); deleteBook(); });
   $('users-btn').addEventListener('click', openUsers);
+  $('password-btn').addEventListener('click', openPassword);
+  $('backup-btn').addEventListener('click', backupData);
   $('logout-btn').addEventListener('click', async () => { await api('POST', '/api/auth/logout'); location.reload(); });
 
   $('import-btn').addEventListener('click', openImport);
@@ -589,7 +657,17 @@ function wireStaticHandlers() {
   document.querySelectorAll('.modal').forEach((m) =>
     m.addEventListener('click', (e) => { if (e.target === m) closeModals(); }));
   document.addEventListener('click', () => closeMenu());
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeModals(); closeMenu(); } });
+
+  // Pintasan keyboard: Esc tutup; "n" transaksi baru; "/" fokus pencarian.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { closeModals(); closeMenu(); return; }
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+    if ([...document.querySelectorAll('.modal')].some((m) => !m.classList.contains('hidden'))) return;
+    if ($('app-view').classList.contains('hidden')) return;
+    if (e.key === 'n' || e.key === 'N') { e.preventDefault(); openTxModal('masuk'); }
+    else if (e.key === '/' && state.view === 'catatan') { e.preventDefault(); $('search-input').focus(); }
+  });
 }
 
 // ============================================================
@@ -620,14 +698,46 @@ function monthlyAgg() {
 function renderAnalytics() {
   const has = state.transactions.length > 0;
   $('analytics-empty').classList.toggle('hidden', has);
-  const ids = ['stat-tiles', 'chart-monthly', 'chart-balance', 'breakdown-keluar', 'breakdown-masuk'];
+  const ids = ['compare', 'stat-tiles', 'chart-monthly', 'chart-balance', 'breakdown-keluar', 'breakdown-masuk'];
   if (!has) { ids.forEach((id) => ($(id).innerHTML = '')); return; }
   const months = monthlyAgg();
+  renderCompare();
   renderTiles(months);
   renderMonthlyChart(months);
   renderBalanceChart(months);
   renderBreakdown('keluar', $('breakdown-keluar'));
   renderBreakdown('masuk', $('breakdown-masuk'));
+}
+
+function prevMonth(ym) {
+  let [y, m] = ym.split('-').map(Number);
+  m--; if (m < 1) { m = 12; y--; }
+  return `${y}-${String(m).padStart(2, '0')}`;
+}
+function renderCompare() {
+  const now = todayISO().slice(0, 7), prev = prevMonth(now);
+  const agg = (ym) => {
+    let masuk = 0, keluar = 0;
+    for (const t of state.transactions) if (t.tanggal.slice(0, 7) === ym) { if (t.type === 'masuk') masuk += t.jumlah; else keluar += t.jumlah; }
+    return { masuk, keluar };
+  };
+  const a = agg(now), b = agg(prev);
+  const items = [
+    { label: 'Pemasukan', now: a.masuk, prev: b.masuk, goodUp: true },
+    { label: 'Pengeluaran', now: a.keluar, prev: b.keluar, goodUp: false },
+    { label: 'Selisih (Net)', now: a.masuk - a.keluar, prev: b.masuk - b.keluar, goodUp: true },
+  ];
+  const title = document.querySelector('.compare-wrap h3');
+  if (title) title.textContent = `Bulan Ini (${labelBulan(now)}) vs Bulan Lalu (${labelBulan(prev)})`;
+  $('compare').innerHTML = items.map((it) => {
+    const diff = it.now - it.prev;
+    const pct = it.prev !== 0 ? Math.round((diff / Math.abs(it.prev)) * 100) : (it.now !== 0 ? 100 : 0);
+    const arrow = diff > 0 ? '▲' : diff < 0 ? '▼' : '→';
+    const sign = diff > 0 ? '+' : diff < 0 ? '−' : '';
+    const cls = diff === 0 ? 'cmp-flat' : (diff > 0) === it.goodUp ? 'cmp-up' : 'cmp-down';
+    const delta = `${arrow} ${sign}${rupiah(Math.abs(diff))}${it.prev !== 0 ? ` (${sign}${Math.abs(pct)}%)` : ''}`;
+    return `<div class="cmp"><div class="cmp-label">${it.label}</div><div class="cmp-value">${rupiah(it.now)}</div><div class="cmp-delta ${cls}">${delta}</div></div>`;
+  }).join('');
 }
 function renderTiles(months) {
   const n = months.length;
