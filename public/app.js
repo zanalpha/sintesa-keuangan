@@ -59,7 +59,8 @@ const state = {
   user: null,
   books: [],
   bookId: null,
-  transactions: [],
+  transactions: [],       // transaksi rekening terpilih (Catatan/Buku Besar)
+  allTransactions: [],    // semua transaksi lintas rekening (Analitik gabungan)
   month: '',
   kategori: '',
   search: '',
@@ -131,14 +132,14 @@ async function loadBooks() {
   const { books } = await api('GET', '/api/books');
   state.books = books;
   if (books.length === 0) {
-    const { book } = await api('POST', '/api/books', { name: 'Kas Utama' });
+    const { book } = await api('POST', '/api/books', { name: 'Rekening Utama' });
     state.books = [book];
   }
   const remembered = Number(localStorage.getItem('sintesa_book'));
   const found = state.books.find((b) => b.id === remembered);
   state.bookId = found ? found.id : state.books[0].id;
   renderBookSelect();
-  await loadTransactions();
+  await loadData();
 }
 
 function renderBookSelect() {
@@ -152,10 +153,12 @@ function renderBookSelect() {
   }
 }
 
-async function loadTransactions() {
+async function loadData() {
   localStorage.setItem('sintesa_book', String(state.bookId));
-  const { transactions } = await api('GET', `/api/books/${state.bookId}/transactions`);
-  state.transactions = transactions;
+  // Satu sumber: ambil semua transaksi lintas rekening, lalu saring untuk rekening terpilih.
+  const { transactions } = await api('GET', '/api/all-transactions');
+  state.allTransactions = transactions;
+  state.transactions = transactions.filter((t) => t.book_id === state.bookId);
   buildMonthFilter();
   render();
 }
@@ -189,14 +192,19 @@ function visibleTx() {
 
 function render() {
   const book = curBook();
-  const saldoAwal = book ? book.saldo_awal : 0;
-  const totalMasuk = state.transactions.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
-  const totalKeluar = state.transactions.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
+  const combined = state.view === 'analitik'; // Analitik = gabungan semua rekening
+  // Kartu & info-bar mengikuti scope tampilan aktif.
+  const scopeTx = combined ? state.allTransactions : state.transactions;
+  const scopeSaldoAwal = combined
+    ? state.books.reduce((s, b) => s + (b.saldo_awal || 0), 0)
+    : (book ? book.saldo_awal : 0);
+  const totalMasuk = scopeTx.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
+  const totalKeluar = scopeTx.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
 
   $('sum-masuk').textContent = rupiah(totalMasuk);
   $('sum-keluar').textContent = rupiah(totalKeluar);
-  $('sum-sisa').textContent = rupiah(saldoAwal + totalMasuk - totalKeluar);
-  renderBookInfo(book, saldoAwal);
+  $('sum-sisa').textContent = rupiah(scopeSaldoAwal + totalMasuk - totalKeluar);
+  renderBookInfo(book, scopeSaldoAwal, combined, scopeTx.length);
 
   const rows = visibleTx();
   renderColumn('masuk', rows.filter((t) => t.type === 'masuk'));
@@ -205,14 +213,21 @@ function render() {
 
   if (state.view === 'besar') renderBukuBesar();
   if (state.view === 'analitik') renderAnalytics();
-  buildPrint(book, saldoAwal, totalMasuk, totalKeluar);
+  buildPrint(book, scopeSaldoAwal, totalMasuk, totalKeluar);
 }
 
-function renderBookInfo(book, saldoAwal) {
-  const parts = [`<span class="bi-name">${escapeHtml(book ? book.name : '')}</span>`];
-  parts.push(`<span class="bi-item">Saldo Awal: <b>${rupiah(saldoAwal)}</b></span>`);
-  if (book && book.bank_info) parts.push(`<span class="bi-item">Rekening: <b>${escapeHtml(book.bank_info)}</b></span>`);
-  parts.push(`<span class="bi-item">Jumlah transaksi: <b>${state.transactions.length}</b></span>`);
+function renderBookInfo(book, saldoAwal, combined, txCount) {
+  const parts = [];
+  if (combined) {
+    parts.push(`<span class="bi-name">📊 Gabungan Semua Rekening</span>`);
+    parts.push(`<span class="bi-item"><b>${state.books.length}</b> rekening</span>`);
+    parts.push(`<span class="bi-item">Saldo Awal gabungan: <b>${rupiah(saldoAwal)}</b></span>`);
+  } else {
+    parts.push(`<span class="bi-name">${escapeHtml(book ? book.name : '')}</span>`);
+    parts.push(`<span class="bi-item">Saldo Awal: <b>${rupiah(saldoAwal)}</b></span>`);
+    if (book && book.bank_info) parts.push(`<span class="bi-item">No. Rekening: <b>${escapeHtml(book.bank_info)}</b></span>`);
+  }
+  parts.push(`<span class="bi-item">Jumlah transaksi: <b>${txCount}</b></span>`);
   $('book-info').innerHTML = parts.join('');
 }
 
@@ -444,7 +459,7 @@ $('tx-form').addEventListener('submit', async (e) => {
     if (f.id.value) { await api('PATCH', `/api/transactions/${f.id.value}`, payload); toast('Transaksi diperbarui.'); }
     else { await api('POST', `/api/books/${state.bookId}/transactions`, payload); toast('Transaksi ditambahkan.'); }
     closeModals();
-    await loadTransactions();
+    await loadData();
   } catch (err) { $('tx-error').textContent = err.message; }
 });
 
@@ -459,7 +474,7 @@ function openBookModal(book) {
   f.name.value = book ? book.name : '';
   f.saldo_awal.value = book && book.saldo_awal ? new Intl.NumberFormat('id-ID').format(book.saldo_awal) : '';
   f.bank_info.value = book ? book.bank_info || '' : '';
-  $('book-modal-title').textContent = book ? 'Pengaturan Buku' : 'Buku Kas Baru';
+  $('book-modal-title').textContent = book ? 'Pengaturan Rekening' : 'Rekening Baru';
   $('book-modal').classList.remove('hidden');
   setTimeout(() => f.name.focus(), 50);
 }
@@ -470,23 +485,23 @@ $('book-form').addEventListener('submit', async (e) => {
   $('book-error').textContent = '';
   const payload = { name: f.name.value, saldo_awal: f.saldo_awal.value.replace(/\D/g, ''), bank_info: f.bank_info.value };
   try {
-    if (f.id.value) { await api('PATCH', `/api/books/${f.id.value}`, payload); toast('Buku diperbarui.'); }
-    else { const { book } = await api('POST', '/api/books', payload); state.bookId = book.id; toast('Buku dibuat.'); }
+    if (f.id.value) { await api('PATCH', `/api/books/${f.id.value}`, payload); toast('Rekening diperbarui.'); }
+    else { const { book } = await api('POST', '/api/books', payload); state.bookId = book.id; toast('Rekening dibuat.'); }
     closeModals();
     await loadBooks();
   } catch (err) { $('book-error').textContent = err.message; }
 });
 
 async function deleteBook() {
-  if (state.books.length <= 1) return toast('Minimal harus ada satu buku.', true);
+  if (state.books.length <= 1) return toast('Minimal harus ada satu rekening.', true);
   const book = curBook();
-  if (!confirm(`Hapus buku "${book.name}" beserta SEMUA transaksinya? Tindakan ini tidak bisa dibatalkan.`)) return;
+  if (!confirm(`Hapus rekening "${book.name}" beserta SEMUA transaksinya? Tindakan ini tidak bisa dibatalkan.`)) return;
   try {
     await api('DELETE', `/api/books/${state.bookId}`);
     localStorage.removeItem('sintesa_book');
     state.bookId = null;
     await loadBooks();
-    toast('Buku dihapus.');
+    toast('Rekening dihapus.');
   } catch (err) { toast(err.message, true); }
 }
 
@@ -636,7 +651,7 @@ $('import-file').addEventListener('change', async (e) => {
     const res = await api('POST', `/api/books/${state.bookId}/transactions/bulk`, { transactions: txs });
     $('import-result').textContent = `Berhasil impor ${res.inserted} transaksi${res.gagal ? `, ${res.gagal} baris dilewati` : ''}.`;
     toast(`Impor selesai: ${res.inserted} transaksi.`);
-    await loadTransactions();
+    await loadData();
   } catch (err) { $('import-result').textContent = ''; $('import-error').textContent = err.message; }
 });
 function downloadTemplate() {
@@ -685,10 +700,11 @@ function buildPrint(book, saldoAwal, totalMasuk, totalKeluar) {
     const d = computeBesar();
     if (d.from || d.to) periode = `${d.from ? tanggalIndo(d.from) : 'awal'} — ${d.to ? tanggalIndo(d.to) : 'kini'}`;
   } else if (state.month) periode = labelBulan(state.month);
+  const scopeName = state.view === 'analitik' ? 'Gabungan Semua Rekening' : (book ? book.name : '');
   $('print-head').innerHTML = `
     <div class="ph-company">PT SINTESA DATA SEMESTA</div>
-    <div class="ph-sub">Sistem Pencatatan Keuangan${book && book.bank_info ? ' · ' + escapeHtml(book.bank_info) : ''}</div>
-    <div class="ph-title">Laporan ${viewName} — ${escapeHtml(book ? book.name : '')}</div>
+    <div class="ph-sub">Sistem Pencatatan Keuangan${state.view !== 'analitik' && book && book.bank_info ? ' · ' + escapeHtml(book.bank_info) : ''}</div>
+    <div class="ph-title">Laporan ${viewName} — ${escapeHtml(scopeName)}</div>
     <div class="ph-meta">Periode: ${periode} · Dicetak: ${tanggalIndo(todayISO())}</div>`;
   $('print-foot').innerHTML = `<div class="sign">Mengetahui,<div class="sign-line">${escapeHtml(state.user ? state.user.name : '')}</div></div>`;
 }
@@ -714,7 +730,7 @@ function wireStaticHandlers() {
       if (tx) openTxModal(tx.type, tx);
     } else if (delId) {
       if (!confirm('Hapus transaksi ini?')) return;
-      try { await api('DELETE', `/api/transactions/${delId}`); toast('Transaksi dihapus.'); await loadTransactions(); }
+      try { await api('DELETE', `/api/transactions/${delId}`); toast('Transaksi dihapus.'); await loadData(); }
       catch (err) { toast(err.message, true); }
     }
   });
@@ -728,7 +744,7 @@ function wireStaticHandlers() {
     state.bookId = Number(e.target.value);
     state.month = ''; state.kategori = ''; state.search = ''; state.besarFrom = ''; state.besarTo = '';
     $('search-input').value = ''; $('besar-from').value = ''; $('besar-to').value = '';
-    loadTransactions();
+    loadData();
   });
   $('month-filter').addEventListener('change', (e) => { state.month = e.target.value; render(); });
   $('kategori-filter').addEventListener('change', (e) => { state.kategori = e.target.value; render(); });
@@ -796,9 +812,14 @@ function singkatRp(n) {
   return 'Rp' + Math.round(n);
 }
 function bulanChart(ym) { const [y, m] = ym.split('-'); return BULAN_S[Number(m) - 1] + " '" + y.slice(2); }
+
+// Analitik SELALU memakai data gabungan lintas rekening.
+function anaTx() { return state.allTransactions; }
+function anaSaldoAwal() { return state.books.reduce((s, b) => s + (b.saldo_awal || 0), 0); }
+
 function monthlyAgg() {
   const map = new Map();
-  for (const t of state.transactions) {
+  for (const t of anaTx()) {
     const ym = t.tanggal.slice(0, 7);
     if (!map.has(ym)) map.set(ym, { ym, masuk: 0, keluar: 0 });
     map.get(ym)[t.type] += t.jumlah;
@@ -807,17 +828,36 @@ function monthlyAgg() {
 }
 
 function renderAnalytics() {
-  const has = state.transactions.length > 0;
+  const has = anaTx().length > 0;
   $('analytics-empty').classList.toggle('hidden', has);
-  const ids = ['compare', 'stat-tiles', 'chart-monthly', 'chart-balance', 'breakdown-keluar', 'breakdown-masuk'];
+  const ids = ['compare', 'rekening-summary', 'stat-tiles', 'chart-monthly', 'chart-balance', 'breakdown-keluar', 'breakdown-masuk'];
   if (!has) { ids.forEach((id) => ($(id).innerHTML = '')); return; }
   const months = monthlyAgg();
   renderCompare();
+  renderRekeningSummary();
   renderTiles(months);
   renderMonthlyChart(months);
   renderBalanceChart(months);
   renderBreakdown('keluar', $('breakdown-keluar'));
   renderBreakdown('masuk', $('breakdown-masuk'));
+}
+
+function renderRekeningSummary() {
+  const rows = state.books.map((b) => {
+    const tx = state.allTransactions.filter((t) => t.book_id === b.id);
+    const masuk = tx.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
+    const keluar = tx.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
+    return { name: b.name, bank: b.bank_info, saldo: (b.saldo_awal || 0) + masuk - keluar, masuk, keluar };
+  });
+  $('rekening-summary').innerHTML = rows.map((r) => `
+    <div class="rek-row">
+      <div class="rek-name">${escapeHtml(r.name)}${r.bank ? ` <span class="muted">· ${escapeHtml(r.bank)}</span>` : ''}</div>
+      <div class="rek-nums">
+        <span class="rek-in">+${rupiah(r.masuk)}</span>
+        <span class="rek-out">−${rupiah(r.keluar)}</span>
+        <span class="rek-saldo">${rupiah(r.saldo)}</span>
+      </div>
+    </div>`).join('');
 }
 
 function prevMonth(ym) {
@@ -829,7 +869,7 @@ function renderCompare() {
   const now = todayISO().slice(0, 7), prev = prevMonth(now);
   const agg = (ym) => {
     let masuk = 0, keluar = 0;
-    for (const t of state.transactions) if (t.tanggal.slice(0, 7) === ym) { if (t.type === 'masuk') masuk += t.jumlah; else keluar += t.jumlah; }
+    for (const t of anaTx()) if (t.tanggal.slice(0, 7) === ym) { if (t.type === 'masuk') masuk += t.jumlah; else keluar += t.jumlah; }
     return { masuk, keluar };
   };
   const a = agg(now), b = agg(prev);
@@ -855,8 +895,8 @@ function renderTiles(months) {
   const totalMasuk = months.reduce((s, m) => s + m.masuk, 0);
   const totalKeluar = months.reduce((s, m) => s + m.keluar, 0);
   const avgMasuk = totalMasuk / n, avgKeluar = totalKeluar / n, avgNet = avgMasuk - avgKeluar;
-  let big = state.transactions[0];
-  for (const t of state.transactions) if (t.jumlah > big.jumlah) big = t;
+  let big = anaTx()[0];
+  for (const t of anaTx()) if (t.jumlah > big.jumlah) big = t;
   const bigSub = (big.type === 'masuk' ? 'Pemasukan' : 'Pengeluaran') + (big.keterangan ? ' · ' + big.keterangan : '');
   const tiles = [
     { label: 'Rata-rata Pemasukan / bulan', value: rupiah(avgMasuk), sub: `dari ${n} bulan aktif`, cls: 'pos' },
@@ -889,8 +929,7 @@ function renderMonthlyChart(months) {
 }
 function renderBalanceChart(months) {
   const H = 240, padL = 58, padR = 34, padT = 16, padB = 30, plotH = H - padT - padB;
-  const saldoAwal = curBook() ? curBook().saldo_awal : 0;
-  let cum = saldoAwal;
+  let cum = anaSaldoAwal();
   const pts = months.map((m) => ({ ym: m.ym, v: (cum += m.masuk - m.keluar) }));
   const step = pts.length > 1 ? Math.max(50, Math.min(120, 620 / (pts.length - 1))) : 0;
   const innerW = pts.length > 1 ? step * (pts.length - 1) : 360;
@@ -915,7 +954,7 @@ function renderBalanceChart(months) {
 }
 function renderBreakdown(type, container) {
   const map = new Map();
-  for (const t of state.transactions) {
+  for (const t of anaTx()) {
     if (t.type !== type) continue;
     const k = t.kategori || 'Tanpa kategori';
     map.set(k, (map.get(k) || 0) + t.jumlah);

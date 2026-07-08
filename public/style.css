@@ -292,6 +292,14 @@ h1, h2, h3 { font-family: var(--serif); }
 .bd-track { background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: 6px; height: 10px; overflow: hidden; }
 .bd-fill { height: 100%; border-radius: 6px; }
 .breakdown-empty { color: var(--muted-2); font-style: italic; font-size: 13px; }
+/* Saldo per Rekening */
+.rek-summary { display: flex; flex-direction: column; }
+.rek-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; }
+.rek-row:last-child { border-bottom: 0; }
+.rek-name { font-weight: 700; }
+.rek-nums { display: flex; align-items: center; gap: 14px; font-family: var(--mono); font-size: 13px; }
+.rek-in { color: var(--in); } .rek-out { color: var(--out); }
+.rek-saldo { color: var(--teal); font-weight: 700; min-width: 120px; text-align: right; }
 .analytics-empty { text-align: center; color: var(--muted-2); font-style: italic; padding: 20px; }
 
 /* ---------- Toast ---------- */

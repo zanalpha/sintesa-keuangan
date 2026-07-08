@@ -180,6 +180,29 @@ router.get('/books/:id/transactions', async (req, res, next) => {
   }
 });
 
+// Semua transaksi lintas rekening (untuk Analitik gabungan). Tanpa blob bukti.
+router.get('/all-transactions', async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, book_id, type, tanggal, jumlah, keterangan, kategori, (bukti IS NOT NULL) AS has_bukti
+         FROM transactions ORDER BY tanggal ASC, id ASC`
+    );
+    const transactions = rows.map((r) => ({
+      id: r.id,
+      book_id: r.book_id,
+      type: r.type,
+      tanggal: r.tanggal,
+      jumlah: num(r.jumlah),
+      keterangan: r.keterangan,
+      kategori: r.kategori,
+      has_bukti: !!r.has_bukti,
+    }));
+    res.json({ transactions });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // Ringkasan sepanjang waktu (dipakai untuk kartu Sisa Anggaran).
 router.get('/books/:id/summary', async (req, res, next) => {
   try {

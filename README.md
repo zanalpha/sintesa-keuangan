@@ -8,7 +8,7 @@ Dibuat untuk **PT Sintesa Data Semesta**.
 ## Fitur
 
 - Login akun (aman, password di-hash dengan bcrypt). Registrasi publik dimatikan; akun ditambah oleh admin lewat **Kelola Pengguna**.
-- Banyak **Buku Kas** dengan **Saldo Awal** dan **Info Rekening/Bank** per buku.
+- Banyak **Rekening** (mis. BCA, KOPRA MANDIRI) dengan **Saldo Awal** & nomor rekening masing-masing. Pencatatan pemasukan/pengeluaran **terpisah per rekening**, tetapi **Analitik menggabungkan semua rekening** (+ panel Saldo per Rekening).
 - Tiga tampilan:
   - **Catatan** — dua kolom Pemasukan / Pengeluaran, total, dan **Saldo Akhir** otomatis.
   - **Buku Besar** — daftar kronologis dengan **Saldo Berjalan** dan filter rentang tanggal (dari–sampai).

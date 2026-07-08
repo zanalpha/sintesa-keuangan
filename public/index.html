@@ -40,16 +40,16 @@
         </div>
         <div class="topbar-right">
           <label class="book-picker">
-            <span class="sr-only">Pilih buku kas</span>
-            <select id="book-select"></select>
+            <span class="sr-only">Pilih rekening</span>
+            <select id="book-select" title="Sumber Rekening"></select>
           </label>
-          <button id="new-book-btn" class="btn btn-ghost" title="Buku kas baru">＋ Buku</button>
+          <button id="new-book-btn" class="btn btn-ghost" title="Rekening baru">＋ Rekening</button>
           <button id="theme-btn" class="icon-toggle" title="Ganti tema terang/gelap" aria-label="Ganti tema">🌙</button>
           <div class="menu">
             <button id="menu-btn" class="btn btn-ghost" aria-label="Menu">☰</button>
             <div id="menu-dropdown" class="menu-dropdown hidden">
-              <button id="settings-book-btn">⚙ Pengaturan buku</button>
-              <button id="delete-book-btn" class="danger">🗑 Hapus buku ini</button>
+              <button id="settings-book-btn">⚙ Pengaturan rekening</button>
+              <button id="delete-book-btn" class="danger">🗑 Hapus rekening ini</button>
               <hr />
               <button id="users-btn">👥 Kelola pengguna</button>
               <button id="password-btn">🔑 Ganti password</button>
@@ -180,6 +180,10 @@
             <h3>Bulan Ini vs Bulan Lalu</h3>
             <div class="compare" id="compare"></div>
           </div>
+          <div class="chart-card">
+            <h3>Saldo per Rekening</h3>
+            <div id="rekening-summary" class="rek-summary"></div>
+          </div>
           <div class="stat-tiles" id="stat-tiles"></div>
           <div class="chart-card">
             <div class="chart-head"><h3>Pemasukan vs Pengeluaran per Bulan</h3>
@@ -233,12 +237,12 @@
     <!-- ======================= MODAL PENGATURAN BUKU ======================= -->
     <div id="book-modal" class="modal hidden">
       <div class="modal-box">
-        <h3 id="book-modal-title">Pengaturan Buku</h3>
+        <h3 id="book-modal-title">Pengaturan Rekening</h3>
         <form id="book-form">
           <input type="hidden" name="id" />
-          <label>Nama Buku<input name="name" maxlength="100" required placeholder="mis. Kas Utama" /></label>
+          <label>Nama Rekening<input name="name" maxlength="100" required placeholder="mis. BCA / KOPRA MANDIRI" /></label>
           <label>Saldo Awal (Rp)<input name="saldo_awal" inputmode="numeric" autocomplete="off" placeholder="0" /></label>
-          <label>Info Rekening / Bank<input name="bank_info" maxlength="200" placeholder="mis. BANK BCA 0562593452" /></label>
+          <label>Nomor Rekening / Bank<input name="bank_info" maxlength="200" placeholder="mis. BANK BCA 0562593452" /></label>
           <p class="form-error" id="book-error"></p>
           <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary">Simpan</button></div>
         </form>
