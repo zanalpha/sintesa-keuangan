@@ -49,7 +49,6 @@
             <button id="menu-btn" class="btn btn-ghost" aria-label="Menu">☰</button>
             <div id="menu-dropdown" class="menu-dropdown hidden">
               <button id="settings-book-btn">⚙ Pengaturan rekening</button>
-              <button id="delete-book-btn" class="danger">🗑 Hapus rekening ini</button>
               <hr />
               <button id="users-btn">👥 Kelola pengguna</button>
               <button id="password-btn">🔑 Ganti password</button>
@@ -118,6 +117,12 @@
             <label class="field-inline"><span>Dari</span><input id="besar-from" type="date" /></label>
             <label class="field-inline"><span>Sampai</span><input id="besar-to" type="date" /></label>
             <button id="besar-reset" class="btn btn-ghost btn-sm">Semua</button>
+          </div>
+
+          <div class="tool-filters hidden" id="tools-analitik">
+            <label class="field-inline"><span>Analitik</span>
+              <select id="ana-scope"><option value="">Gabungan (Semua Rekening)</option></select>
+            </label>
           </div>
 
           <div class="toolbar-right">
@@ -244,7 +249,11 @@
           <label>Saldo Awal (Rp)<input name="saldo_awal" inputmode="numeric" autocomplete="off" placeholder="0" /></label>
           <label>Nomor Rekening / Bank<input name="bank_info" maxlength="200" placeholder="mis. BANK BCA 0562593452" /></label>
           <p class="form-error" id="book-error"></p>
-          <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary">Simpan</button></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-danger btn-sm hidden" id="book-delete">🗑 Hapus Rekening</button>
+            <button type="button" class="btn btn-ghost" data-close>Batal</button>
+            <button type="submit" class="btn btn-primary">Simpan</button>
+          </div>
         </form>
       </div>
     </div>

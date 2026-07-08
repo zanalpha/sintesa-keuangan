@@ -101,6 +101,9 @@ h1, h2, h3 { font-family: var(--serif); }
 .btn-out { background: var(--out); color: #2a0605; }
 .btn-ghost { background: var(--panel-2); color: var(--ink); border-color: var(--line); }
 .btn-ghost:hover { border-color: var(--teal-dim); }
+.btn-danger { background: transparent; color: var(--out); border-color: var(--out); }
+.btn-danger:hover { background: var(--out-soft); }
+#book-delete { margin-right: auto; }
 .btn-block { width: 100%; padding: 12px; }
 :root[data-theme="light"] .btn-primary { color: #fff; }
 :root[data-theme="light"] .btn-in { color: #fff; }
