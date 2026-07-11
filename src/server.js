@@ -6,7 +6,7 @@ const path = require('path');
 const express = require('express');
 const cookieSession = require('cookie-session');
 
-const { migrate, isMemory } = require('./db');
+const { migrate, seedAdmin, ping, end: dbEnd, isMemory } = require('./db');
 const { router: authRouter, loadUser } = require('./auth');
 const apiRouter = require('./routes');
 
@@ -16,6 +16,18 @@ const isProd = process.env.NODE_ENV === 'production';
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1); // penting di Render agar secure cookie & req.ip benar
+
+// Log ringkas per-request API (timestamp, metode, path, status, durasi) — bisa dicari di log Render.
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api')) return next();
+  const t0 = Date.now();
+  res.on('finish', () => {
+    console.log(
+      `[${new Date().toISOString()}] ${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - t0}ms`
+    );
+  });
+  next();
+});
 
 // Header keamanan (setara helmet, tanpa dependensi).
 app.use((req, res, next) => {
@@ -51,14 +63,18 @@ app.use(
   })
 );
 
-app.use(loadUser);
+// Muat user HANYA untuk permintaan /api (jangan jalankan kueri DB untuk tiap aset statis).
+app.use('/api', loadUser);
 
 // API
 app.use('/api/auth', authRouter);
 app.use('/api', apiRouter);
 
-// Cek kesehatan (untuk Render health check)
-app.get('/healthz', (req, res) => res.json({ ok: true }));
+// Cek kesehatan — memverifikasi koneksi DB sungguhan (bukan sekadar proses hidup).
+app.get('/healthz', async (req, res) => {
+  const ok = await ping();
+  res.status(ok ? 200 : 503).json({ ok, db: ok ? 'up' : 'down' });
+});
 
 // Frontend statis
 app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -84,18 +100,37 @@ process.on('unhandledRejection', (reason) => {
   console.error('[server] unhandledRejection:', reason);
 });
 
+let server;
+
 async function start() {
   await migrate();
-  app.listen(PORT, () => {
+  await seedAdmin();
+  server = app.listen(PORT, () => {
     console.log(`\n  Sintesa Keuangan berjalan di http://localhost:${PORT}`);
-    if (isMemory()) {
-      console.log('  Mode: database sementara (data tidak permanen).');
-    }
+    if (isMemory()) console.log('  Mode: database sementara (data tidak permanen).');
     console.log('');
+  });
+  return server;
+}
+
+// Matikan dengan rapi saat deploy (Render mengirim SIGTERM): berhenti terima koneksi baru,
+// tunggu request berjalan selesai, tutup pool DB, lalu keluar.
+function shutdown(signal) {
+  console.log(`[server] ${signal} diterima — mematikan dengan rapi...`);
+  const done = () => dbEnd().finally(() => process.exit(0));
+  if (server) server.close(done);
+  else done();
+  setTimeout(() => process.exit(1), 10000).unref(); // paksa keluar bila menggantung
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Hanya jalankan server bila dieksekusi langsung (bukan saat di-import oleh test).
+if (require.main === module) {
+  start().catch((e) => {
+    console.error('Gagal memulai server:', e);
+    process.exit(1);
   });
 }
 
-start().catch((e) => {
-  console.error('Gagal memulai server:', e);
-  process.exit(1);
-});
+module.exports = { app, start };

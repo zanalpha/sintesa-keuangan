@@ -1,0 +1,37 @@
+name: Cadangan DB Harian
+
+# Backup off-site otomatis: pg_dump database Render setiap hari, disimpan sebagai
+# artifact GitHub (retensi 30 hari). WAJIB set secret DATABASE_URL di repo:
+#   Settings > Secrets and variables > Actions > New repository secret
+#   Name: DATABASE_URL  Value: (Internal/External Database URL dari Render)
+on:
+  schedule:
+    - cron: '0 19 * * *' # 19:00 UTC = 02:00 WIB setiap hari
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pasang postgresql-client 16 (PGDG)
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-16
+
+      - name: pg_dump -> berkas terkompresi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then echo "Secret DATABASE_URL belum diisi."; exit 1; fi
+          ts=$(date -u +%Y%m%d-%H%M%S)
+          /usr/lib/postgresql/16/bin/pg_dump "$DATABASE_URL" | gzip > "sintesa-backup-$ts.sql.gz"
+          ls -lh sintesa-backup-*.sql.gz
+
+      - name: Unggah sebagai artifact (off-site, retensi 30 hari)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sintesa-db-backup-${{ github.run_id }}
+          path: sintesa-backup-*.sql.gz
+          retention-days: 30

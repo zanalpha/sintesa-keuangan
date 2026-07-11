@@ -309,6 +309,47 @@ h1, h2, h3 { font-family: var(--serif); }
 .rek-saldo { color: var(--teal); font-weight: 700; min-width: 120px; text-align: right; }
 .analytics-empty { text-align: center; color: var(--muted-2); font-style: italic; padding: 20px; }
 
+/* ---------- Peran (viewer = hanya baca) ---------- */
+body.role-viewer .admin-only { display: none !important; }
+.sr-role { color: #05221f; background: var(--gold); font-weight: 700; padding: 1px 8px; border-radius: 999px;
+  letter-spacing: 1px; font-size: 10px; }
+.u-role { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; padding: 1px 7px; border-radius: 999px; }
+.u-role-admin { color: var(--teal); border: 1px solid var(--teal-dim); }
+.u-role-viewer { color: var(--muted); border: 1px solid var(--line); }
+
+/* ---------- Baris checkbox (mis. "Simpan & tambah lagi") ---------- */
+.checkbox-row { display: flex !important; align-items: center; gap: 8px; text-transform: none !important;
+  letter-spacing: 0 !important; font-weight: 600; color: var(--ink) !important; font-size: 13px; margin: 4px 0 10px; cursor: pointer; }
+.checkbox-row input { width: auto !important; margin: 0 !important; }
+
+/* ---------- Aksesibilitas: target sentuh & focus ring keyboard ---------- */
+.icon-btn, .bukti-chip, .vt-btn, .u-del { min-height: 34px; min-width: 34px; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--teal); outline-offset: 2px; border-radius: 6px;
+}
+@media (max-width: 560px) {
+  .icon-btn, .bukti-chip { min-height: 40px; min-width: 40px; }
+}
+
+/* ---------- Riwayat audit ---------- */
+.audit-box { max-width: 620px; }
+.audit-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.audit-table td { padding: 6px 8px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+.audit-table .a-when { white-space: nowrap; color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.audit-table .a-who { white-space: nowrap; font-weight: 600; }
+.a-act { font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: .5px; padding: 1px 6px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line); }
+.a-create { color: var(--in); } .a-update { color: var(--gold); } .a-delete, .a-restore { color: var(--out); } .a-transfer { color: var(--teal); }
+
+/* ---------- Overlay loading / cold-start ---------- */
+.boot-loading { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center;
+  background: var(--bg); }
+.boot-card { display: flex; align-items: center; gap: 12px; color: var(--muted); font-family: var(--serif); font-size: 16px; }
+.spinner { width: 22px; height: 22px; border: 2.5px solid var(--line); border-top-color: var(--teal);
+  border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+
 /* ---------- Toast ---------- */
 .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--panel); color: var(--ink);
   border: 1px solid var(--teal-dim); padding: 11px 18px; border-radius: 9px; box-shadow: 0 0 20px var(--glow), var(--shadow);

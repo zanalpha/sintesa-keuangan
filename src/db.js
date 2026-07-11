@@ -16,10 +16,13 @@ function createPool() {
   if (url) {
     const { Pool } = require('pg');
     const isLocal = /localhost|127\.0\.0\.1/.test(url);
+    // Verifikasi sertifikat server DB dapat diaktifkan (defense-in-depth) via PGSSL_STRICT=1.
+    // Default longgar agar tetap tersambung ke Postgres Render (sertifikat self-signed).
+    const strictSsl = process.env.PGSSL_STRICT === '1' || process.env.PGSSL_STRICT === 'true';
     const pgPool = new Pool({
       connectionString: url,
       // Render (dan hosting Postgres lain) memerlukan SSL untuk koneksi eksternal.
-      ssl: isLocal ? false : { rejectUnauthorized: false },
+      ssl: isLocal ? false : { rejectUnauthorized: strictSsl },
       max: 10,
     });
     // PENTING: tanpa listener ini, error pada koneksi idle (mis. Postgres Render
@@ -98,6 +101,9 @@ async function run(statements) {
   }
 }
 
+// Versi skema saat ini. Naikkan bila menambah langkah migrasi baru.
+const SCHEMA_VERSION = 2;
+
 /** Membuat tabel bila belum ada. Aman dipanggil berulang kali. */
 async function migrate() {
   await run([
@@ -125,17 +131,49 @@ async function migrate() {
        created_by  INTEGER REFERENCES users(id),
        created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
      )`,
+    // Jejak audit: siapa melakukan apa (buat/ubah/hapus) — penting untuk catatan keuangan.
+    `CREATE TABLE IF NOT EXISTS audit_log (
+       id        SERIAL PRIMARY KEY,
+       at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+       user_id   INTEGER,
+       username  TEXT,
+       action    TEXT NOT NULL,
+       entity    TEXT NOT NULL,
+       entity_id INTEGER,
+       detail    TEXT NOT NULL DEFAULT ''
+     )`,
+    // Pelacakan versi skema (menggantikan migrasi ad-hoc yang tak tercatat).
+    `CREATE TABLE IF NOT EXISTS schema_migrations (
+       version    INTEGER PRIMARY KEY,
+       applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+     )`,
     `CREATE INDEX IF NOT EXISTS idx_tx_book ON transactions(book_id)`,
     `CREATE INDEX IF NOT EXISTS idx_tx_tanggal ON transactions(tanggal)`,
+    // Index komposit untuk kueri per-rekening per-rentang tanggal.
+    `CREATE INDEX IF NOT EXISTS idx_tx_book_tanggal ON transactions(book_id, tanggal)`,
+    `CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at)`,
   ]);
 
   // Kolom tambahan (dijalankan setelah tabel ada; aman diulang di pg & pg-mem).
   await addColumn('books', "saldo_awal BIGINT NOT NULL DEFAULT 0", 'saldo_awal');
   await addColumn('books', "bank_info TEXT NOT NULL DEFAULT ''", 'bank_info');
   await addColumn('transactions', 'bukti TEXT', 'bukti'); // data URL gambar/pdf, boleh kosong
+  await addColumn('transactions', 'deleted_at TIMESTAMPTZ', 'deleted_at'); // soft-delete
+  await addColumn('users', "role TEXT NOT NULL DEFAULT 'admin'", 'role'); // 'admin' | 'viewer'
+
+  // Catat versi skema (best-effort; abaikan bila balapan antar-instance).
+  try {
+    await query('INSERT INTO schema_migrations (version) VALUES ($1)', [SCHEMA_VERSION]);
+  } catch (_) {
+    /* versi sudah tercatat */
+  }
 }
 
-/** Menambah kolom secara idempoten, kompatibel Postgres & pg-mem. */
+/**
+ * Menambah kolom secara idempoten, kompatibel Postgres & pg-mem.
+ * Bila semua upaya gagal karena alasan tak terduga (bukan "kolom sudah ada"),
+ * error dicatat alih-alih ditelan diam-diam.
+ */
 async function addColumn(table, coldef, colname) {
   try {
     await query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${coldef}`);
@@ -149,9 +187,71 @@ async function addColumn(table, coldef, colname) {
   } catch (_) {
     try {
       await query(`ALTER TABLE ${table} ADD COLUMN ${coldef}`);
-    } catch (_) {
-      /* abaikan jika balapan/duplikat */
+    } catch (e) {
+      console.error(`[db] Gagal menambah kolom ${table}.${colname}:`, e.message);
     }
+  }
+}
+
+/**
+ * Membuat akun admin pertama dari variabel lingkungan ADMIN_USER/ADMIN_PASSWORD
+ * bila tabel users masih kosong. Menutup celah "pengunjung pertama jadi admin"
+ * pada instance baru / DB yang di-provision ulang, dan membuat aplikasi langsung
+ * bisa dipakai tanpa registrasi publik.
+ */
+async function seedAdmin() {
+  const { rows } = await query('SELECT COUNT(*)::int AS n FROM users');
+  if (rows[0].n > 0) return;
+  const username = String(process.env.ADMIN_USER || '').trim().toLowerCase();
+  const password = String(process.env.ADMIN_PASSWORD || '');
+  const name = String(process.env.ADMIN_NAME || 'Administrator').trim();
+  if (!username || password.length < 6) {
+    console.warn(
+      '[db] Belum ada pengguna dan ADMIN_USER/ADMIN_PASSWORD belum diisi.\n' +
+        '      Set env ADMIN_USER & ADMIN_PASSWORD (min 6 karakter) lalu restart untuk membuat admin pertama.'
+    );
+    return;
+  }
+  const bcrypt = require('bcryptjs');
+  const hash = await bcrypt.hash(password, 12);
+  await query(
+    "INSERT INTO users (username, name, password_hash, role) VALUES ($1, $2, $3, 'admin')",
+    [username, name, hash]
+  );
+  console.log(`[db] Admin pertama '${username}' dibuat dari environment.`);
+}
+
+/** Cek konektivitas DB untuk health check. */
+async function ping() {
+  try {
+    await query('SELECT 1');
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Mencatat satu baris jejak audit (best-effort — kegagalan audit tak menggagalkan operasi).
+ * `q` opsional: berikan fungsi kueri dari withTransaction agar audit ikut dalam transaksi.
+ */
+async function audit(entry, q) {
+  const run_ = q || query;
+  try {
+    await run_(
+      `INSERT INTO audit_log (user_id, username, action, entity, entity_id, detail)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        entry.userId ?? null,
+        entry.username ?? null,
+        entry.action,
+        entry.entity,
+        entry.entityId ?? null,
+        entry.detail ?? '',
+      ]
+    );
+  } catch (e) {
+    console.error('[db] Gagal menulis audit_log:', e.message);
   }
 }
 
@@ -159,4 +259,11 @@ function isMemory() {
   return usingMemory;
 }
 
-module.exports = { query, withTransaction, migrate, isMemory };
+/** Menutup pool koneksi (untuk graceful shutdown). */
+async function end() {
+  if (pool && typeof pool.end === 'function') {
+    try { await pool.end(); } catch (_) { /* abaikan */ }
+  }
+}
+
+module.exports = { query, withTransaction, migrate, seedAdmin, ping, audit, isMemory, end };

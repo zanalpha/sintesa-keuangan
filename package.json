@@ -7,7 +7,11 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node src/server.js"
+    "dev": "node src/server.js",
+    "test": "node --test",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "engines": {
     "node": ">=18"
@@ -20,6 +24,8 @@
     "pg": "^8.12.0"
   },
   "devDependencies": {
+    "eslint": "^9.13.0",
+    "prettier": "^3.3.3",
     "pg-mem": "^3.0.5"
   }
 }

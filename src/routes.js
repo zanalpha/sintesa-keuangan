@@ -1,11 +1,11 @@
 'use strict';
 
 const express = require('express');
-const { query, withTransaction } = require('./db');
-const { requireAuth } = require('./auth');
+const { query, withTransaction, audit } = require('./db');
+const { requireAuth, requireAdmin } = require('./auth');
 
 const router = express.Router();
-router.use(requireAuth); // semua route di bawah ini butuh login
+router.use(requireAuth); // semua route di bawah ini butuh login (baca). Mutasi butuh requireAdmin.
 
 // Validasi parameter :id sekali di sini agar id non-angka (mis. /api/books/abc)
 // menghasilkan 400 yang jelas, bukan 500 dari Postgres ("invalid input syntax for integer").
@@ -52,17 +52,91 @@ async function bookExists(id) {
 }
 
 // ---------- BACKUP ----------
-// Unduh seluruh data (semua buku + transaksi) sebagai JSON.
-router.get('/backup', async (req, res, next) => {
+// Unduh seluruh data (semua buku + transaksi + bukti) sebagai JSON v2.
+// DI-STREAM per-batch agar tak menahan SEMUA blob bukti di memori sekaligus (cegah OOM).
+router.get('/backup', requireAdmin, async (req, res, next) => {
   try {
+    res.type('application/json');
     const books = (await query('SELECT id, name, saldo_awal, bank_info, created_at FROM books ORDER BY id')).rows
       .map((b) => ({ ...b, saldo_awal: num(b.saldo_awal) }));
-    // Sertakan kolom "bukti" (data URL lampiran) supaya cadangan benar-benar LENGKAP —
-    // tanpa ini foto struk/nota tidak ikut ter-backup dan hilang bila database hilang.
-    const transactions = (await query(
-      'SELECT id, book_id, type, tanggal, jumlah, keterangan, kategori, bukti, created_at FROM transactions ORDER BY id'
-    )).rows.map((t) => ({ ...t, jumlah: num(t.jumlah) }));
-    res.json({ app: 'sintesa-keuangan', version: 2, books, transactions });
+    res.write('{"app":"sintesa-keuangan","version":2,"books":' + JSON.stringify(books) + ',"transactions":[');
+    const BATCH = 200;
+    let offset = 0, first = true;
+    for (;;) {
+      const { rows } = await query(
+        `SELECT id, book_id, type, tanggal, jumlah, keterangan, kategori, bukti, created_at
+           FROM transactions WHERE deleted_at IS NULL ORDER BY id LIMIT $1 OFFSET $2`,
+        [BATCH, offset]
+      );
+      if (rows.length === 0) break;
+      for (const t of rows) {
+        res.write((first ? '' : ',') + JSON.stringify({ ...t, jumlah: num(t.jumlah) }));
+        first = false;
+      }
+      offset += rows.length;
+      if (rows.length < BATCH) break;
+    }
+    res.write(']}');
+    res.end();
+  } catch (e) {
+    if (res.headersSent) res.end();
+    else next(e);
+  }
+});
+
+// ---------- RESTORE ----------
+// Memulihkan data dari JSON hasil /backup (v1/v2). Hanya admin.
+// mode 'replace' menghapus data yang ada lebih dulu; tanpa itu, hanya boleh saat DB masih kosong.
+router.post('/restore', requireAdmin, async (req, res, next) => {
+  try {
+    const data = req.body || {};
+    const books = Array.isArray(data.books) ? data.books : null;
+    const txs = Array.isArray(data.transactions) ? data.transactions : null;
+    if (!books || !txs) return res.status(400).json({ error: 'File cadangan tidak valid (butuh books & transactions).' });
+    const mode = data.mode === 'replace' || req.query.mode === 'replace' ? 'replace' : 'empty-only';
+
+    const result = await withTransaction(async (q) => {
+      const existing = (await q('SELECT COUNT(*)::int AS n FROM books')).rows[0].n;
+      if (existing > 0 && mode !== 'replace') {
+        const err = new Error('Database tidak kosong. Gunakan mode "replace" untuk menimpa.');
+        err.status = 409;
+        throw err;
+      }
+      if (mode === 'replace') {
+        await q('DELETE FROM transactions');
+        await q('DELETE FROM books');
+      }
+      // Petakan id buku lama -> id buku baru (SERIAL memberi id baru).
+      const idMap = new Map();
+      let nb = 0, nt = 0;
+      for (const b of books) {
+        const name = String(b.name || '').trim().slice(0, 100) || 'Rekening';
+        const saldo = parseAmount(b.saldo_awal) ?? 0;
+        const bank = String(b.bank_info || '').trim().slice(0, 200);
+        const r = await q(
+          'INSERT INTO books (name, saldo_awal, bank_info, created_by) VALUES ($1,$2,$3,$4) RETURNING id',
+          [name, saldo, bank, req.session.userId]
+        );
+        idMap.set(b.id, r.rows[0].id);
+        nb++;
+      }
+      for (const t of txs) {
+        const bookId = idMap.get(t.book_id);
+        if (!bookId) continue; // transaksi tanpa buku terpetakan -> lewati
+        const { type, tanggal, jumlah, keterangan, kategori } = readTxBody(t);
+        if (!type || !validDate(tanggal) || jumlah === null) continue;
+        const nbk = normBukti(t.bukti);
+        await q(
+          `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, bukti, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [bookId, type, tanggal, jumlah, keterangan, kategori, nbk.ok ? nbk.value : null, req.session.userId]
+        );
+        nt++;
+      }
+      await audit({ userId: req.user.id, username: req.user.username, action: 'restore', entity: 'database', detail: `${nb} rekening, ${nt} transaksi (${mode})` }, q);
+      return { books: nb, transactions: nt, mode };
+    });
+    res.json({ ok: true, ...result });
   } catch (e) {
     next(e);
   }
@@ -77,7 +151,7 @@ router.get('/books', async (req, res, next) => {
               COALESCE(SUM(CASE WHEN t.type = 'masuk'  THEN t.jumlah END), 0) AS masuk,
               COALESCE(SUM(CASE WHEN t.type = 'keluar' THEN t.jumlah END), 0) AS keluar
          FROM books b
-         LEFT JOIN transactions t ON t.book_id = b.id
+         LEFT JOIN transactions t ON t.book_id = b.id AND t.deleted_at IS NULL
         GROUP BY b.id, b.name, b.saldo_awal, b.bank_info
         ORDER BY b.id`
     );
@@ -106,7 +180,7 @@ function readBookBody(body) {
   return { name, saldo_awal, bank_info };
 }
 
-router.post('/books', async (req, res, next) => {
+router.post('/books', requireAdmin, async (req, res, next) => {
   try {
     const { name, saldo_awal, bank_info } = readBookBody(req.body);
     if (name.length < 1 || name.length > 100)
@@ -117,6 +191,7 @@ router.post('/books', async (req, res, next) => {
       [name, saldo_awal, bank_info, req.session.userId]
     );
     const b = rows[0];
+    await audit({ userId: req.user.id, username: req.user.username, action: 'create', entity: 'book', entityId: b.id, detail: name });
     res.status(201).json({
       book: { id: b.id, name: b.name, saldo_awal: num(b.saldo_awal), bank_info: b.bank_info || '', masuk: 0, keluar: 0, sisa: num(b.saldo_awal) },
     });
@@ -125,7 +200,7 @@ router.post('/books', async (req, res, next) => {
   }
 });
 
-router.patch('/books/:id', async (req, res, next) => {
+router.patch('/books/:id', requireAdmin, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const { name, saldo_awal, bank_info } = readBookBody(req.body);
@@ -138,21 +213,24 @@ router.patch('/books/:id', async (req, res, next) => {
     );
     if (!rows.length) return res.status(404).json({ error: 'Buku tidak ditemukan.' });
     const b = rows[0];
+    await audit({ userId: req.user.id, username: req.user.username, action: 'update', entity: 'book', entityId: id, detail: name });
     res.json({ book: { id: b.id, name: b.name, saldo_awal: num(b.saldo_awal), bank_info: b.bank_info || '' } });
   } catch (e) {
     next(e);
   }
 });
 
-router.delete('/books/:id', async (req, res, next) => {
+router.delete('/books/:id', requireAdmin, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    if (!(await bookExists(id))) return res.status(404).json({ error: 'Buku tidak ditemukan.' });
+    const bk = await query('SELECT name FROM books WHERE id = $1', [id]);
+    if (!bk.rows.length) return res.status(404).json({ error: 'Buku tidak ditemukan.' });
     // Atomik: hapus transaksi + rekening dalam satu transaksi DB. Bila gagal di tengah,
     // ROLLBACK memulihkan keduanya (mencegah transaksi hilang sementara rekening tetap ada).
     await withTransaction(async (q) => {
       await q('DELETE FROM transactions WHERE book_id = $1', [id]);
       await q('DELETE FROM books WHERE id = $1', [id]);
+      await audit({ userId: req.user.id, username: req.user.username, action: 'delete', entity: 'book', entityId: id, detail: bk.rows[0].name }, q);
     });
     res.json({ ok: true });
   } catch (e) {
@@ -171,7 +249,7 @@ router.get('/books/:id/transactions', async (req, res, next) => {
     // Catatan: kolom "bukti" (blob) TIDAK diambil di daftar agar respons tetap ringan;
     // hanya penanda has_bukti. Blob diambil terpisah lewat /transactions/:id/bukti.
     let sql = `SELECT id, type, tanggal, jumlah, keterangan, kategori, (bukti IS NOT NULL) AS has_bukti
-                 FROM transactions WHERE book_id = $1`;
+                 FROM transactions WHERE book_id = $1 AND deleted_at IS NULL`;
     const params = [id];
 
     if (req.query.month) {
@@ -203,7 +281,7 @@ router.get('/all-transactions', async (req, res, next) => {
   try {
     const { rows } = await query(
       `SELECT id, book_id, type, tanggal, jumlah, keterangan, kategori, (bukti IS NOT NULL) AS has_bukti
-         FROM transactions ORDER BY tanggal ASC, id ASC`
+         FROM transactions WHERE deleted_at IS NULL ORDER BY tanggal ASC, id ASC`
     );
     const transactions = rows.map((r) => ({
       id: r.id,
@@ -229,7 +307,7 @@ router.get('/books/:id/summary', async (req, res, next) => {
     const { rows } = await query(
       `SELECT COALESCE(SUM(CASE WHEN type = 'masuk'  THEN jumlah END), 0) AS masuk,
               COALESCE(SUM(CASE WHEN type = 'keluar' THEN jumlah END), 0) AS keluar
-         FROM transactions WHERE book_id = $1`,
+         FROM transactions WHERE book_id = $1 AND deleted_at IS NULL`,
       [id]
     );
     const bk = await query('SELECT saldo_awal FROM books WHERE id = $1', [id]);
@@ -253,15 +331,18 @@ function readTxBody(body) {
 
 const BUKTI_MAX = 4_000_000; // ~3MB biner setelah base64
 // Validasi bukti: null/'' -> hapus; data URL gambar/pdf -> simpan.
+// Regex DIANCHOR di kedua ujung (^...$) dan payload wajib base64 murni, sehingga muatan
+// aneh (mis. yang mencoba menyisipkan markup) ditolak, bukan disimpan verbatim.
 function normBukti(v) {
   if (v === null || v === '' || v === undefined) return { ok: true, value: null };
   if (typeof v !== 'string') return { ok: false };
-  if (!/^data:(image\/(png|jpe?g|webp|gif)|application\/pdf);base64,/.test(v)) return { ok: false };
+  if (!/^data:(image\/(png|jpe?g|webp|gif)|application\/pdf);base64,[A-Za-z0-9+/]+={0,2}$/.test(v))
+    return { ok: false };
   if (v.length > BUKTI_MAX) return { ok: false, tooBig: true };
   return { ok: true, value: v };
 }
 
-router.post('/books/:id/transactions', async (req, res, next) => {
+router.post('/books/:id/transactions', requireAdmin, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!(await bookExists(id))) return res.status(404).json({ error: 'Buku tidak ditemukan.' });
@@ -280,14 +361,53 @@ router.post('/books/:id/transactions', async (req, res, next) => {
       [id, type, tanggal, jumlah, keterangan, kategori, nb.value, req.session.userId]
     );
     const t = rows[0];
+    await audit({ userId: req.user.id, username: req.user.username, action: 'create', entity: 'transaction', entityId: t.id, detail: `${type} ${num(t.jumlah)} @book:${id}` });
     res.status(201).json({ transaction: { ...t, jumlah: num(t.jumlah), has_bukti: !!t.has_bukti } });
   } catch (e) {
     next(e);
   }
 });
 
+// Transfer antar rekening: buat pasangan transaksi (keluar di asal, masuk di tujuan) secara atomik.
+router.post('/transfer', requireAdmin, async (req, res, next) => {
+  try {
+    const fromId = Number(req.body.from_book);
+    const toId = Number(req.body.to_book);
+    const tanggal = String(req.body.tanggal || '');
+    const jumlah = parseAmount(req.body.jumlah);
+    const catatan = String(req.body.keterangan || '').trim().slice(0, 300);
+    if (!Number.isInteger(fromId) || !Number.isInteger(toId) || fromId === toId)
+      return res.status(400).json({ error: 'Pilih dua rekening berbeda.' });
+    if (!validDate(tanggal)) return res.status(400).json({ error: 'Tanggal tidak valid.' });
+    if (jumlah === null || jumlah <= 0) return res.status(400).json({ error: 'Jumlah tidak valid.' });
+
+    const bk = await query('SELECT id, name FROM books WHERE id IN ($1, $2)', [fromId, toId]);
+    if (bk.rows.length !== 2) return res.status(404).json({ error: 'Rekening tidak ditemukan.' });
+    const nameOf = (id) => (bk.rows.find((r) => r.id === id) || {}).name || '';
+
+    await withTransaction(async (q) => {
+      const ketOut = `Transfer ke ${nameOf(toId)}${catatan ? ' — ' + catatan : ''}`.slice(0, 500);
+      const ketIn = `Transfer dari ${nameOf(fromId)}${catatan ? ' — ' + catatan : ''}`.slice(0, 500);
+      await q(
+        `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, created_by)
+         VALUES ($1,'keluar',$2,$3,$4,'Transfer',$5)`,
+        [fromId, tanggal, jumlah, ketOut, req.session.userId]
+      );
+      await q(
+        `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, created_by)
+         VALUES ($1,'masuk',$2,$3,$4,'Transfer',$5)`,
+        [toId, tanggal, jumlah, ketIn, req.session.userId]
+      );
+      await audit({ userId: req.user.id, username: req.user.username, action: 'transfer', entity: 'transaction', detail: `${jumlah} ${nameOf(fromId)}->${nameOf(toId)}` }, q);
+    });
+    res.status(201).json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // Import massal (mis. dari file CSV spreadsheet lama).
-router.post('/books/:id/transactions/bulk', async (req, res, next) => {
+router.post('/books/:id/transactions/bulk', requireAdmin, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!(await bookExists(id))) return res.status(404).json({ error: 'Buku tidak ditemukan.' });
@@ -316,6 +436,7 @@ router.post('/books/:id/transactions/bulk', async (req, res, next) => {
         );
         ok++;
       }
+      if (ok > 0) await audit({ userId: req.user.id, username: req.user.username, action: 'import', entity: 'transaction', entityId: id, detail: `${ok} baris @book:${id}` }, q);
       return ok;
     });
     res.status(201).json({ inserted, gagal: errors.length, errors: errors.slice(0, 20) });
@@ -324,7 +445,7 @@ router.post('/books/:id/transactions/bulk', async (req, res, next) => {
   }
 });
 
-router.patch('/transactions/:id', async (req, res, next) => {
+router.patch('/transactions/:id', requireAdmin, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const { type, tanggal, jumlah, keterangan, kategori } = readTxBody(req.body);
@@ -343,12 +464,13 @@ router.patch('/transactions/:id', async (req, res, next) => {
     }
     params.push(id);
     const { rows } = await query(
-      `UPDATE transactions SET ${sets.join(', ')} WHERE id=$${params.length}
+      `UPDATE transactions SET ${sets.join(', ')} WHERE id=$${params.length} AND deleted_at IS NULL
         RETURNING id, type, tanggal, jumlah, keterangan, kategori, (bukti IS NOT NULL) AS has_bukti`,
       params
     );
     if (!rows.length) return res.status(404).json({ error: 'Transaksi tidak ditemukan.' });
     const t = rows[0];
+    await audit({ userId: req.user.id, username: req.user.username, action: 'update', entity: 'transaction', entityId: id, detail: `${type} ${num(t.jumlah)}` });
     res.json({ transaction: { ...t, jumlah: num(t.jumlah), has_bukti: !!t.has_bukti } });
   } catch (e) {
     next(e);
@@ -359,7 +481,7 @@ router.patch('/transactions/:id', async (req, res, next) => {
 router.get('/transactions/:id/bukti', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const { rows } = await query('SELECT bukti FROM transactions WHERE id = $1', [id]);
+    const { rows } = await query('SELECT bukti FROM transactions WHERE id = $1 AND deleted_at IS NULL', [id]);
     if (!rows.length) return res.status(404).json({ error: 'Transaksi tidak ditemukan.' });
     if (!rows[0].bukti) return res.status(404).json({ error: 'Tidak ada bukti untuk transaksi ini.' });
     res.json({ bukti: rows[0].bukti });
@@ -368,11 +490,17 @@ router.get('/transactions/:id/bukti', async (req, res, next) => {
   }
 });
 
-router.delete('/transactions/:id', async (req, res, next) => {
+// Hapus transaksi = SOFT-DELETE (set deleted_at). Data tetap ada untuk audit/pemulihan,
+// tapi tak lagi muncul di daftar/analitik/laporan.
+router.delete('/transactions/:id', requireAdmin, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const { rows } = await query('DELETE FROM transactions WHERE id = $1 RETURNING id', [id]);
+    const { rows } = await query(
+      'UPDATE transactions SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL RETURNING id, type, jumlah',
+      [id]
+    );
     if (!rows.length) return res.status(404).json({ error: 'Transaksi tidak ditemukan.' });
+    await audit({ userId: req.user.id, username: req.user.username, action: 'delete', entity: 'transaction', entityId: id, detail: `${rows[0].type} ${num(rows[0].jumlah)}` });
     res.json({ ok: true });
   } catch (e) {
     next(e);

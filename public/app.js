@@ -117,8 +117,17 @@ async function boot() {
     if (status.authenticated) { state.user = status.user; await enterApp(); }
     else showAuth();
   } catch (e) { showAuth(); }
+  $('boot-loading').classList.add('hidden');
 }
 function showAuth() { $('app-view').classList.add('hidden'); $('auth-view').classList.remove('hidden'); }
+
+function isAdmin() { return !!(state.user && state.user.role === 'admin'); }
+// Sesuaikan UI dengan peran: viewer tak melihat kontrol yang mengubah data.
+function applyRole() {
+  const viewer = !isAdmin();
+  document.body.classList.toggle('role-viewer', viewer);
+  $('sr-role').classList.toggle('hidden', !viewer);
+}
 
 $('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -137,8 +146,9 @@ $('login-form').addEventListener('submit', async (e) => {
 async function enterApp() {
   $('auth-view').classList.add('hidden');
   $('app-view').classList.remove('hidden');
-  $('menu-user').textContent = 'Masuk sebagai ' + state.user.name;
+  $('menu-user').textContent = 'Masuk sebagai ' + state.user.name + (isAdmin() ? '' : ' (viewer)');
   $('sr-user').textContent = state.user.name.toUpperCase();
+  applyRole();
   await loadBooks();
 }
 
@@ -273,9 +283,9 @@ function renderColumn(type, list) {
         <td class="c-date">${tanggalIndo(t.tanggal)}</td>
         <td class="c-amt">${rupiah(t.jumlah)}</td>
         <td>${escapeHtml(t.keterangan) || '<span class="muted">—</span>'}${t.kategori ? ` <span class="muted">· ${escapeHtml(t.kategori)}</span>` : ''}${t.has_bukti ? ` <button type="button" class="bukti-chip" data-bukti="${t.id}" title="Lihat bukti">📎 bukti</button>` : ''}</td>
-        <td class="c-act"><div class="row-actions">
+        <td class="c-act"><div class="row-actions">${isAdmin() ? `
           <button class="icon-btn" title="Ubah" aria-label="Ubah transaksi ${tanggalIndo(t.tanggal)} ${rupiah(t.jumlah)}" data-edit="${t.id}">✎</button>
-          <button class="icon-btn" title="Hapus" aria-label="Hapus transaksi ${tanggalIndo(t.tanggal)} ${rupiah(t.jumlah)}" data-del="${t.id}">🗑</button>
+          <button class="icon-btn" title="Hapus" aria-label="Hapus transaksi ${tanggalIndo(t.tanggal)} ${rupiah(t.jumlah)}" data-del="${t.id}">🗑</button>` : ''}
         </div></td>`;
       tbody.appendChild(tr);
     });
@@ -295,25 +305,17 @@ function updateKategoriList() {
 }
 
 // ---------- Buku Besar (saldo berjalan) ----------
+// Memakai computeLedger (algoritma saldo berjalan yang sama dengan laporan cetak) agar tak ganda.
 function computeBesar() {
   const book = curBook();
   const saldoAwal = book ? book.saldo_awal : 0;
-  const sorted = [...state.transactions].sort((a, b) =>
-    a.tanggal < b.tanggal ? -1 : a.tanggal > b.tanggal ? 1 : a.id - b.id);
   const { besarFrom: from, besarTo: to } = state;
-  let opening = saldoAwal;
-  for (const t of sorted) if (from && t.tanggal < from) opening += t.type === 'masuk' ? t.jumlah : -t.jumlah;
-  let running = opening, tMasuk = 0, tKeluar = 0;
-  const rows = [];
-  for (const t of sorted) {
-    if (from && t.tanggal < from) continue;
-    if (to && t.tanggal > to) continue;
-    running += t.type === 'masuk' ? t.jumlah : -t.jumlah;
-    if (t.type === 'masuk') tMasuk += t.jumlah; else tKeluar += t.jumlah;
-    rows.push({ id: t.id, has_bukti: t.has_bukti, tanggal: t.tanggal, keterangan: t.keterangan, kategori: t.kategori,
-      masuk: t.type === 'masuk' ? t.jumlah : 0, keluar: t.type === 'keluar' ? t.jumlah : 0, saldo: running });
-  }
-  return { saldoAwal, opening, rows, tMasuk, tKeluar, saldoAkhir: running, from, to };
+  const L = computeLedger(state.transactions, saldoAwal, from, to);
+  const rows = L.rows.map((t) => ({
+    id: t.id, has_bukti: t.has_bukti, tanggal: t.tanggal, keterangan: t.keterangan, kategori: t.kategori,
+    masuk: t.type === 'masuk' ? t.jumlah : 0, keluar: t.type === 'keluar' ? t.jumlah : 0, saldo: t.saldo,
+  }));
+  return { saldoAwal, opening: L.opening, rows, tMasuk: L.tMasuk, tKeluar: L.tKeluar, saldoAkhir: L.saldoAkhir, from, to };
 }
 
 function renderBukuBesar() {
@@ -422,7 +424,14 @@ function showBukti(dataUrl) {
     area.innerHTML = `<p class="muted">Bukti berupa dokumen PDF. Klik "Unduh" untuk membukanya.</p>`;
   } else {
     dl.download = 'bukti.jpg';
-    area.innerHTML = `<img src="${dataUrl}" alt="Bukti transaksi" class="bukti-img" />`;
+    // Set src lewat properti (bukan interpolasi innerHTML) agar data URL tak bisa
+    // "membocor" jadi markup — aman meski isinya tak terduga.
+    area.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = dataUrl;
+    img.alt = 'Bukti transaksi';
+    img.className = 'bukti-img';
+    area.appendChild(img);
   }
   $('bukti-modal').classList.remove('hidden');
 }
@@ -492,10 +501,21 @@ $('tx-form').addEventListener('submit', async (e) => {
   // Sertakan "bukti" hanya bila diubah (data URL baru, atau null bila dihapus).
   if (buktiState.changed) payload.bukti = buktiState.data;
   try {
-    if (f.id.value) { await api('PATCH', `/api/transactions/${f.id.value}`, payload); toast('Transaksi diperbarui.'); }
-    else { await api('POST', `/api/books/${state.bookId}/transactions`, payload); toast('Transaksi ditambahkan.'); }
-    closeModals();
+    const isNew = !f.id.value;
+    if (isNew) { await api('POST', `/api/books/${state.bookId}/transactions`, payload); toast('Transaksi ditambahkan.'); }
+    else { await api('PATCH', `/api/transactions/${f.id.value}`, payload); toast('Transaksi diperbarui.'); }
+    const again = isNew && $('tx-again').checked;
     await loadData();
+    if (again) {
+      // Entri cepat berturut-turut: buka ulang modal bersih, pertahankan jenis & tanggal.
+      const type = f.type.value, tanggal = f.tanggal.value;
+      openTxModal(type);
+      $('tx-form').tanggal.value = tanggal;
+      $('tx-again').checked = true;
+      setTimeout(() => $('tx-form').jumlah.focus(), 60);
+    } else {
+      closeModals();
+    }
   } catch (err) { $('tx-error').textContent = err.message; }
 });
 
@@ -561,7 +581,8 @@ async function openUsers() {
       const del = self
         ? '<span class="u-self">(Anda)</span>'
         : `<button type="button" class="icon-btn u-del" data-deluser="${u.id}" aria-label="Hapus pengguna ${escapeHtml(u.name)}" title="Hapus pengguna">🗑</button>`;
-      return `<li><span class="u-name">${escapeHtml(u.name)}</span><span class="u-username">@${escapeHtml(u.username)}</span>${del}</li>`;
+      const role = `<span class="u-role u-role-${u.role || 'admin'}">${u.role === 'viewer' ? 'viewer' : 'admin'}</span>`;
+      return `<li><span class="u-name">${escapeHtml(u.name)}</span><span class="u-username">@${escapeHtml(u.username)}</span>${role}${del}</li>`;
     }).join('');
     $('add-user-error').textContent = '';
     $('add-user-form').reset();
@@ -583,7 +604,7 @@ $('add-user-form').addEventListener('submit', async (e) => {
   const f = e.target;
   $('add-user-error').textContent = '';
   try {
-    await api('POST', '/api/auth/register', { name: f.name.value, username: f.username.value, password: f.password.value });
+    await api('POST', '/api/auth/register', { name: f.name.value, username: f.username.value, password: f.password.value, role: f.role.value });
     toast('Pengguna ditambahkan.');
     await openUsers();
   } catch (err) { $('add-user-error').textContent = err.message; }
@@ -621,6 +642,84 @@ async function backupData() {
     const stamp = todayISO();
     downloadBlob(JSON.stringify(data, null, 2), `backup-sintesa-keuangan-${stamp}.json`, 'application/json');
     toast('Cadangan data diunduh.');
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Pulihkan dari cadangan (restore) ----------
+function openRestore() { closeMenu(); $('restore-file').click(); }
+$('restore-file').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  if (!confirm('Pulihkan data dari file cadangan? Ini akan MENIMPA SELURUH data saat ini. Lanjutkan?')) return;
+  try {
+    const data = JSON.parse(await file.text());
+    if (!data.books || !data.transactions) throw new Error('File bukan cadangan yang valid.');
+    data.mode = 'replace';
+    const res = await api('POST', '/api/restore', data);
+    state.bookId = null;
+    localStorage.removeItem('sintesa_book');
+    await loadBooks();
+    toast(`Dipulihkan: ${res.books} rekening, ${res.transactions} transaksi.`);
+  } catch (err) { toast('Gagal memulihkan: ' + err.message, true); }
+});
+
+// ---------- Transfer antar rekening ----------
+function openTransfer() {
+  closeMenu();
+  if (state.books.length < 2) return toast('Butuh minimal 2 rekening untuk transfer.', true);
+  lastFocused = document.activeElement;
+  const f = $('transfer-form');
+  f.reset();
+  $('transfer-error').textContent = '';
+  const opts = state.books.map((b) => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
+  f.from_book.innerHTML = opts;
+  f.to_book.innerHTML = opts;
+  f.from_book.value = String(state.bookId);
+  const other = state.books.find((b) => b.id !== state.bookId);
+  f.to_book.value = String(other ? other.id : state.bookId);
+  f.tanggal.value = todayISO();
+  modalDirty = false;
+  $('transfer-modal').classList.remove('hidden');
+  setTimeout(() => f.jumlah.focus(), 50);
+}
+$('transfer-form').jumlah.addEventListener('input', formatMoneyInput);
+$('transfer-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  $('transfer-error').textContent = '';
+  if (f.from_book.value === f.to_book.value) { $('transfer-error').textContent = 'Pilih dua rekening berbeda.'; return; }
+  const payload = {
+    from_book: Number(f.from_book.value), to_book: Number(f.to_book.value),
+    tanggal: f.tanggal.value, jumlah: f.jumlah.value.replace(/\D/g, ''), keterangan: f.keterangan.value,
+  };
+  if (!payload.jumlah) { $('transfer-error').textContent = 'Jumlah wajib diisi.'; return; }
+  try {
+    await api('POST', '/api/transfer', payload);
+    toast('Transfer berhasil dicatat.');
+    closeModals();
+    await loadData();
+  } catch (err) { $('transfer-error').textContent = err.message; }
+});
+
+// ---------- Riwayat aktivitas (audit) ----------
+function fmtWhen(iso) {
+  try { return new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }); }
+  catch (_) { return String(iso); }
+}
+async function openAudit() {
+  closeMenu();
+  lastFocused = document.activeElement;
+  try {
+    const { events } = await api('GET', '/api/auth/audit');
+    $('audit-list').innerHTML = events.length
+      ? events.map((ev) => `<tr>
+          <td class="a-when">${escapeHtml(fmtWhen(ev.at))}</td>
+          <td class="a-who">${escapeHtml(ev.username || '—')}</td>
+          <td><span class="a-act a-${escapeHtml(ev.action)}">${escapeHtml(ev.action)}</span> ${escapeHtml(ev.entity)}${ev.detail ? ` <span class="muted">· ${escapeHtml(ev.detail)}</span>` : ''}</td>
+        </tr>`).join('')
+      : '<tr><td class="muted">Belum ada aktivitas tercatat.</td></tr>';
+    $('audit-modal').classList.remove('hidden');
   } catch (err) { toast(err.message, true); }
 }
 
@@ -926,7 +1025,7 @@ let lastFocused = null;
 let modalDirty = false;
 
 function closeModals() {
-  ['tx-modal', 'book-modal', 'import-modal', 'users-modal', 'password-modal'].forEach((id) => $(id).classList.add('hidden'));
+  ['tx-modal', 'book-modal', 'import-modal', 'users-modal', 'password-modal', 'transfer-modal', 'audit-modal'].forEach((id) => $(id).classList.add('hidden'));
   modalDirty = false;
   if (lastFocused && typeof lastFocused.focus === 'function') {
     try { lastFocused.focus(); } catch (_) {}
@@ -997,7 +1096,12 @@ function wireStaticHandlers() {
   $('month-filter').addEventListener('change', (e) => { state.month = e.target.value; render(); });
   $('kategori-filter').addEventListener('change', (e) => { state.kategori = e.target.value; render(); });
   $('ana-scope').addEventListener('change', (e) => { state.anaScope = e.target.value; render(); });
-  $('search-input').addEventListener('input', (e) => { state.search = e.target.value; render(); });
+  let searchTimer;
+  $('search-input').addEventListener('input', (e) => {
+    state.search = e.target.value;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(render, 120); // debounce agar tak render ulang tiap ketukan
+  });
   $('besar-from').addEventListener('change', (e) => { state.besarFrom = e.target.value; render(); });
   $('besar-to').addEventListener('change', (e) => { state.besarTo = e.target.value; render(); });
   $('besar-reset').addEventListener('click', () => {
@@ -1011,9 +1115,12 @@ function wireStaticHandlers() {
   $('menu-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
   $('settings-book-btn').addEventListener('click', () => { closeMenu(); openBookModal(curBook()); });
   $('book-delete').addEventListener('click', deleteBook);
+  $('transfer-btn').addEventListener('click', openTransfer);
   $('users-btn').addEventListener('click', openUsers);
   $('password-btn').addEventListener('click', openPassword);
   $('backup-btn').addEventListener('click', backupData);
+  $('restore-btn').addEventListener('click', openRestore);
+  $('audit-btn').addEventListener('click', openAudit);
   $('logout-btn').addEventListener('click', async () => { await api('POST', '/api/auth/logout'); location.reload(); });
 
   $('import-btn').addEventListener('click', openImport);

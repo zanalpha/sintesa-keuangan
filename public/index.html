@@ -43,16 +43,20 @@
             <span class="sr-only">Pilih rekening</span>
             <select id="book-select" title="Sumber Rekening"></select>
           </label>
-          <button id="new-book-btn" class="btn btn-ghost" title="Rekening baru">＋ Rekening</button>
+          <button id="new-book-btn" class="btn btn-ghost admin-only" title="Rekening baru">＋ Rekening</button>
           <button id="theme-btn" class="icon-toggle" title="Ganti tema terang/gelap" aria-label="Ganti tema">🌙</button>
           <div class="menu">
             <button id="menu-btn" class="btn btn-ghost" aria-label="Menu">☰</button>
             <div id="menu-dropdown" class="menu-dropdown hidden">
-              <button id="settings-book-btn">⚙ Pengaturan rekening</button>
-              <hr />
-              <button id="users-btn">👥 Kelola pengguna</button>
+              <button id="settings-book-btn" class="admin-only">⚙ Pengaturan rekening</button>
+              <button id="transfer-btn" class="admin-only">⇄ Transfer antar rekening</button>
+              <hr class="admin-only" />
+              <button id="users-btn" class="admin-only">👥 Kelola pengguna</button>
               <button id="password-btn">🔑 Ganti password</button>
-              <button id="backup-btn">💾 Cadangkan data (JSON)</button>
+              <button id="backup-btn" class="admin-only">💾 Cadangkan data (JSON)</button>
+              <button id="restore-btn" class="admin-only">♻ Pulihkan dari cadangan</button>
+              <button id="audit-btn" class="admin-only">📜 Riwayat aktivitas</button>
+              <input id="restore-file" type="file" accept="application/json,.json" class="hidden" />
               <hr />
               <span class="menu-user" id="menu-user"></span>
               <button id="logout-btn">↩ Keluar</button>
@@ -68,6 +72,7 @@
         <span id="sr-clock">--:--:--</span>
         <span class="sr-sep">|</span>
         <span id="sr-user"></span>
+        <span id="sr-role" class="sr-role hidden">HANYA-BACA</span>
       </div>
 
       <main class="container">
@@ -126,7 +131,7 @@
           </div>
 
           <div class="toolbar-right">
-            <button id="import-btn" class="btn btn-ghost">⬆ Impor</button>
+            <button id="import-btn" class="btn btn-ghost admin-only">⬆ Impor</button>
             <button id="export-btn" class="btn btn-ghost">⬇ Ekspor</button>
             <button id="print-btn" class="btn btn-ghost">🖨 Cetak</button>
           </div>
@@ -137,7 +142,7 @@
           <div class="ledger-col">
             <div class="ledger-head ledger-head-in">
               <h2>PEMASUKAN</h2>
-              <button class="btn btn-in btn-sm" data-add="masuk">＋ Tambah</button>
+              <button class="btn btn-in btn-sm admin-only" data-add="masuk">＋ Tambah</button>
             </div>
             <div class="table-wrap">
               <table class="tx-table">
@@ -150,7 +155,7 @@
           <div class="ledger-col">
             <div class="ledger-head ledger-head-out">
               <h2>PENGELUARAN</h2>
-              <button class="btn btn-out btn-sm" data-add="keluar">＋ Tambah</button>
+              <button class="btn btn-out btn-sm admin-only" data-add="keluar">＋ Tambah</button>
             </div>
             <div class="table-wrap">
               <table class="tx-table">
@@ -235,6 +240,7 @@
             </span>
           </div>
           <p class="form-error" role="alert" id="tx-error"></p>
+          <label class="checkbox-row" id="tx-again-row"><input type="checkbox" id="tx-again" /> Simpan &amp; tambah lagi (untuk input cepat)</label>
           <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary" id="tx-submit">Simpan</button></div>
         </form>
       </div>
@@ -294,7 +300,7 @@
         <h3 id="password-modal-title">Ganti Password</h3>
         <form id="password-form">
           <label>Password Lama<input name="current_password" type="password" autocomplete="current-password" required /></label>
-          <label>Password Baru<input name="new_password" type="password" autocomplete="new-password" required placeholder="minimal 6 karakter" /></label>
+          <label>Password Baru<input name="new_password" type="password" autocomplete="new-password" required placeholder="minimal 10 karakter" /></label>
           <label>Ulangi Password Baru<input name="confirm_password" type="password" autocomplete="new-password" required /></label>
           <p class="form-error" role="alert" id="password-error"></p>
           <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary">Simpan</button></div>
@@ -311,11 +317,49 @@
           <h4>Tambah pengguna baru</h4>
           <label>Nama<input name="name" required /></label>
           <label>Username<input name="username" required /></label>
-          <label>Password<input name="password" type="password" required placeholder="minimal 6 karakter" /></label>
+          <label>Password<input name="password" type="password" required placeholder="minimal 10 karakter" /></label>
+          <label>Peran
+            <select name="role">
+              <option value="admin">Admin (bisa mengubah data)</option>
+              <option value="viewer">Viewer (hanya melihat)</option>
+            </select>
+          </label>
           <p class="form-error" role="alert" id="add-user-error"></p>
           <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Tutup</button><button type="submit" class="btn btn-primary">Tambah</button></div>
         </form>
       </div>
+    </div>
+
+    <!-- ======================= MODAL TRANSFER ANTAR REKENING ======================= -->
+    <div id="transfer-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="transfer-modal-title">
+      <div class="modal-box">
+        <h3 id="transfer-modal-title">Transfer Antar Rekening</h3>
+        <p class="muted">Membuat sepasang transaksi otomatis: <em>keluar</em> di rekening asal dan <em>masuk</em> di rekening tujuan.</p>
+        <form id="transfer-form">
+          <label>Dari Rekening<select name="from_book" required></select></label>
+          <label>Ke Rekening<select name="to_book" required></select></label>
+          <label>Tanggal<input name="tanggal" type="date" required /></label>
+          <label>Jumlah (Rp)<input name="jumlah" inputmode="numeric" autocomplete="off" placeholder="0" required /></label>
+          <label>Keterangan (opsional)<input name="keterangan" maxlength="300" placeholder="mis. Isi ulang kas kecil" /></label>
+          <p class="form-error" role="alert" id="transfer-error"></p>
+          <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary">Transfer</button></div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ======================= MODAL RIWAYAT AKTIVITAS (AUDIT) ======================= -->
+    <div id="audit-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="audit-modal-title">
+      <div class="modal-box audit-box">
+        <h3 id="audit-modal-title">Riwayat Aktivitas</h3>
+        <p class="muted">200 kejadian terakhir (buat / ubah / hapus / transfer / pulihkan).</p>
+        <div class="table-wrap"><table class="audit-table"><tbody id="audit-list"></tbody></table></div>
+        <div class="modal-actions"><button type="button" class="btn btn-primary" data-close>Tutup</button></div>
+      </div>
+    </div>
+
+    <!-- Overlay saat memuat / bangun dari cold-start -->
+    <div id="boot-loading" class="boot-loading">
+      <div class="boot-card"><span class="spinner" aria-hidden="true"></span><span>Memuat…</span></div>
     </div>
 
     <div id="toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
