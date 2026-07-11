@@ -342,7 +342,7 @@ h1, h2, h3 { font-family: var(--serif); }
    Seluruh UI aplikasi disembunyikan; hanya #print-report yang tampil.
    ============================================================ */
 @media print {
-  @page { size: A4; margin: 16mm 14mm 18mm; }
+  @page { size: A4; margin: 16mm 14mm; }
 
   html, body { background: #fff !important; }
   body { color: #000 !important; font-family: Georgia, "Times New Roman", serif; font-size: 11px; line-height: 1.4; }
@@ -385,8 +385,8 @@ h1, h2, h3 { font-family: var(--serif); }
 
   /* --- Tabel ledger kronologis (header berulang tiap halaman) --- */
   table.pr-ledger { width: 100%; border-collapse: collapse; font-size: 9.5px; }
-  table.pr-ledger thead { display: table-header-group; }
-  table.pr-ledger tfoot { display: table-footer-group; }
+  table.pr-ledger thead { display: table-header-group; } /* header kolom berulang tiap halaman */
+  table.pr-ledger tfoot { display: table-row-group; }    /* baris TOTAL muncul SEKALI di akhir, tidak berulang */
   table.pr-ledger th, table.pr-ledger td { border: 0.5px solid #999; padding: 3px 5px; }
   table.pr-ledger thead th { background: #e8ecf2 !important; font-size: 8.5px; text-transform: uppercase; letter-spacing: .4px; }
   table.pr-ledger td.num, table.pr-ledger th.num { text-align: right; font-family: ui-monospace, Menlo, Consolas, monospace; white-space: nowrap; }
@@ -416,7 +416,8 @@ h1, h2, h3 { font-family: var(--serif); }
   .pr-sign-name { border-top: 1px solid #000; padding-top: 3px; font-weight: 700; display: inline-block; min-width: 150px; }
   .pr-sign-sub { font-size: 8.5px; color: #555; }
 
-  /* --- Footer berulang tiap halaman --- */
-  .pr-pagefoot { position: fixed; bottom: 0; left: 0; right: 0; font-size: 8px; color: #666;
-    text-align: center; border-top: 0.5px solid #ccc; padding-top: 3px; }
+  /* --- Footer dokumen (statis, muncul sekali di akhir; TIDAK fixed agar tak menimpa isi).
+         Nomor halaman hidup dapat diaktifkan lewat opsi "Headers and footers" dialog cetak. --- */
+  .pr-pagefoot { margin-top: 20px; padding-top: 6px; border-top: 0.5px solid #ccc;
+    font-size: 8px; color: #666; text-align: center; page-break-inside: avoid; }
 }
