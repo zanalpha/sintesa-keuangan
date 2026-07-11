@@ -77,6 +77,8 @@ function applyTheme(t) {
 function initTheme() { applyTheme(localStorage.getItem('sintesa_theme') === 'light' ? 'light' : 'dark'); }
 function toggleTheme() {
   applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+  // Grafik memakai warna dari variabel tema (via JS) — render ulang agar ikut berubah.
+  if (state.user && state.view === 'analitik') renderAnalytics();
 }
 function startClock() {
   const tick = () => {
@@ -1057,7 +1059,17 @@ function wireStaticHandlers() {
 //  ANALITIK (grafik SVG buatan sendiri, tanpa library)
 // ============================================================
 const PALETTE = ['#1b4b78', '#0f7a4d', '#c2984a', '#7b4fa3', '#0e7c86', '#b3261e', '#5a6b7b', '#3a7d44', '#8a6d3b', '#4a5a8a'];
-const C_IN = '#0f7a4d', C_OUT = '#b3261e', C_BAL = '#1b4b78';
+// Warna grafik mengikuti variabel tema (adaptif gelap/terang), dengan fallback aman.
+let C_IN = '#0f7a4d', C_OUT = '#b3261e', C_BAL = '#1b4b78', C_GRID = '#22406a', C_AXIS = '#8ba3c4';
+function refreshChartColors() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (n, fb) => (cs.getPropertyValue(n).trim() || fb);
+  C_IN = v('--in', C_IN);
+  C_OUT = v('--out', C_OUT);
+  C_BAL = v('--teal', C_BAL);     // garis saldo pakai teal merek
+  C_GRID = v('--line-soft', C_GRID);
+  C_AXIS = v('--muted', C_AXIS);
+}
 
 function singkatRp(n) {
   const f = (x) => x.toFixed(x % 1 === 0 ? 0 : 1).replace('.', ',');
@@ -1092,6 +1104,7 @@ function monthlyAgg() {
 }
 
 function renderAnalytics() {
+  refreshChartColors();
   const has = anaTx().length > 0;
   $('analytics-empty').classList.toggle('hidden', has);
   const ids = ['compare', 'rekening-summary', 'stat-tiles', 'chart-monthly', 'chart-balance', 'breakdown-keluar', 'breakdown-masuk'];
@@ -1180,14 +1193,14 @@ function renderMonthlyChart(months) {
   let svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" role="img" aria-label="Grafik pemasukan dan pengeluaran per bulan">`;
   for (let i = 0; i <= 4; i++) {
     const val = (max / 4) * i, yy = y(val);
-    svg += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W - padR}" y2="${yy.toFixed(1)}" stroke="#eef1f6" />`;
-    svg += `<text x="${padL - 8}" y="${(yy + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="#667085">${singkatRp(val)}</text>`;
+    svg += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W - padR}" y2="${yy.toFixed(1)}" stroke="${C_GRID}" />`;
+    svg += `<text x="${padL - 8}" y="${(yy + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="${C_AXIS}">${singkatRp(val)}</text>`;
   }
   months.forEach((m, i) => {
     const cx = padL + groupW * i + groupW / 2, bw = groupW * 0.32, gap = groupW * 0.06;
     svg += `<rect x="${(cx - bw - gap / 2).toFixed(1)}" y="${y(m.masuk).toFixed(1)}" width="${bw.toFixed(1)}" height="${(plotH * m.masuk / max).toFixed(1)}" rx="3" fill="${C_IN}"><title>${bulanChart(m.ym)} — Pemasukan ${rupiah(m.masuk)}</title></rect>`;
     svg += `<rect x="${(cx + gap / 2).toFixed(1)}" y="${y(m.keluar).toFixed(1)}" width="${bw.toFixed(1)}" height="${(plotH * m.keluar / max).toFixed(1)}" rx="3" fill="${C_OUT}"><title>${bulanChart(m.ym)} — Pengeluaran ${rupiah(m.keluar)}</title></rect>`;
-    svg += `<text x="${cx.toFixed(1)}" y="${H - 12}" text-anchor="middle" font-size="11" fill="#667085">${bulanChart(m.ym)}</text>`;
+    svg += `<text x="${cx.toFixed(1)}" y="${H - 12}" text-anchor="middle" font-size="11" fill="${C_AXIS}">${bulanChart(m.ym)}</text>`;
   });
   $('chart-monthly').innerHTML = svg + '</svg>';
 }
@@ -1204,15 +1217,15 @@ function renderBalanceChart(months) {
   const y = (v) => padT + plotH * (1 - (v - minV) / range);
   const y0 = y(0);
   let svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" role="img" aria-label="Grafik saldo berjalan">`;
-  svg += `<line x1="${padL}" y1="${y0.toFixed(1)}" x2="${W - padR}" y2="${y0.toFixed(1)}" stroke="#cbd5e1" stroke-dasharray="4 4" />`;
-  svg += `<text x="${padL - 8}" y="${(y0 + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="#667085">Rp0</text>`;
-  svg += `<text x="${padL - 8}" y="${(y(maxV) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="#667085">${singkatRp(maxV)}</text>`;
+  svg += `<line x1="${padL}" y1="${y0.toFixed(1)}" x2="${W - padR}" y2="${y0.toFixed(1)}" stroke="${C_GRID}" stroke-dasharray="4 4" />`;
+  svg += `<text x="${padL - 8}" y="${(y0 + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="${C_AXIS}">Rp0</text>`;
+  svg += `<text x="${padL - 8}" y="${(y(maxV) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="${C_AXIS}">${singkatRp(maxV)}</text>`;
   const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
   svg += `<path d="${line} L${x(pts.length - 1).toFixed(1)},${y0.toFixed(1)} L${x(0).toFixed(1)},${y0.toFixed(1)} Z" fill="${C_BAL}" opacity="0.12" />`;
   svg += `<path d="${line}" fill="none" stroke="${C_BAL}" stroke-width="2.5" stroke-linejoin="round" />`;
   pts.forEach((p, i) => {
     svg += `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="3.5" fill="${C_BAL}"><title>${bulanChart(p.ym)} — Saldo ${rupiah(p.v)}</title></circle>`;
-    svg += `<text x="${x(i).toFixed(1)}" y="${H - 10}" text-anchor="middle" font-size="11" fill="#667085">${bulanChart(p.ym)}</text>`;
+    svg += `<text x="${x(i).toFixed(1)}" y="${H - 10}" text-anchor="middle" font-size="11" fill="${C_AXIS}">${bulanChart(p.ym)}</text>`;
   });
   $('chart-balance').innerHTML = svg + '</svg>';
 }

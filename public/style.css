@@ -3,29 +3,36 @@
    Gelap = default. Terang via :root[data-theme="light"].
    ============================================================ */
 :root {
-  /* Warna dasar (GELAP) */
-  --bg: #0a1526;
-  --panel: #0e1f37;
-  --panel-2: #12263f;
-  --raise: #16304f;
-  --line: #21406a;
-  --line-soft: #1a3256;
-  --ink: #e7eefb;
-  --muted: #8ba3c4;
-  --muted-2: #5f789b;
+  /* Permukaan (GELAP — "secure terminal") */
+  --bg: #070e1c;
+  --bg-2: #0a1526;
+  --panel: #0c1a30;
+  --panel-2: #0f2038;
+  --raise: #143257;
+  --line: #223f68;
+  --line-soft: #16304f;
+  --ink: #e9f0fc;
+  --muted: #90a6c8;
+  --muted-2: #607a9d;
+
+  /* Identitas merek (dari logo): biru -> sian -> hijau */
+  --brand-1: #2f6bd5;
+  --brand-2: #17a9c4;
+  --brand-3: #16a085;
+  --brand-grad: linear-gradient(100deg, var(--brand-1), var(--brand-2) 52%, var(--brand-3));
 
   /* Aksen */
   --teal: #37dccb;        /* lapisan teknologi / live */
   --teal-dim: #1d8f86;
-  --gold: #d3ad55;        /* lapisan resmi / kop */
+  --gold: #d8b25e;        /* lapisan resmi / kop */
   --in: #35d99a;          /* uang masuk */
   --out: #ff6b6b;         /* uang keluar */
   --in-soft: rgba(53, 217, 154, .12);
   --out-soft: rgba(255, 107, 107, .12);
-  --glow: rgba(55, 220, 203, .35);
+  --glow: rgba(55, 220, 203, .30);
 
-  --radius: 12px;
-  --shadow: 0 2px 4px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .22);
+  --radius: 13px;
+  --shadow: 0 2px 6px rgba(0, 0, 0, .38), 0 14px 34px rgba(0, 0, 0, .3);
   --serif: Georgia, "Times New Roman", "Noto Serif", serif;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -34,6 +41,7 @@
 }
 :root[data-theme="light"] {
   --bg: #eef2f7;
+  --bg-2: #e6ecf4;
   --panel: #ffffff;
   --panel-2: #f7f9fc;
   --raise: #f0f4f9;
@@ -42,6 +50,10 @@
   --ink: #16233a;
   --muted: #5a6b85;
   --muted-2: #8595ad;
+  --brand-1: #2f6bd5;
+  --brand-2: #128ba0;
+  --brand-3: #0f7a4d;
+  --brand-grad: linear-gradient(100deg, var(--brand-1), var(--brand-2) 52%, var(--brand-3));
   --teal: #0e7c86;
   --teal-dim: #0b5b63;
   --gold: #a9812f;
@@ -62,16 +74,17 @@ body { background: var(--bg); color: var(--ink); font-size: 15px; line-height: 1
 body::before {
   content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background:
-    radial-gradient(1100px 560px at 82% -12%, rgba(55, 220, 203, .07), transparent 60%),
-    radial-gradient(900px 520px at -10% 112%, rgba(211, 173, 85, .06), transparent 60%),
-    repeating-linear-gradient(0deg, transparent 0 39px, rgba(130, 165, 210, .045) 39px 40px),
-    repeating-linear-gradient(90deg, transparent 0 39px, rgba(130, 165, 210, .045) 39px 40px);
+    radial-gradient(1200px 600px at 88% -14%, rgba(47, 107, 213, .11), transparent 62%),
+    radial-gradient(1000px 560px at -12% 114%, rgba(22, 160, 133, .10), transparent 62%),
+    repeating-linear-gradient(0deg, transparent 0 31px, rgba(120, 160, 210, .035) 31px 32px),
+    repeating-linear-gradient(90deg, transparent 0 31px, rgba(120, 160, 210, .035) 31px 32px);
 }
 :root[data-theme="light"] body::before {
   background:
-    radial-gradient(1000px 520px at 85% -12%, rgba(14, 124, 134, .05), transparent 60%),
-    repeating-linear-gradient(0deg, transparent 0 39px, rgba(30, 60, 100, .03) 39px 40px),
-    repeating-linear-gradient(90deg, transparent 0 39px, rgba(30, 60, 100, .03) 39px 40px);
+    radial-gradient(1000px 520px at 88% -12%, rgba(47, 107, 213, .055), transparent 60%),
+    radial-gradient(900px 500px at -10% 112%, rgba(22, 160, 133, .05), transparent 60%),
+    repeating-linear-gradient(0deg, transparent 0 31px, rgba(30, 60, 100, .028) 31px 32px),
+    repeating-linear-gradient(90deg, transparent 0 31px, rgba(30, 60, 100, .028) 31px 32px);
 }
 
 .hidden { display: none !important; }
@@ -99,8 +112,9 @@ h1, h2, h3 { font-family: var(--serif); }
 .btn:hover { filter: brightness(1.08); }
 .btn:active { transform: translateY(1px); }
 .btn-sm { padding: 6px 11px; font-size: 13px; }
-.btn-primary { background: var(--teal); color: #05221f; border-color: var(--teal); }
-.btn-primary:hover { box-shadow: 0 0 16px var(--glow); }
+.btn-primary { background: var(--brand-grad); background-size: 170% 100%; color: #fff; border-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14); transition: background-position .3s, box-shadow .15s; }
+.btn-primary:hover { background-position: 100% 0; box-shadow: 0 0 18px rgba(47, 107, 213, .38), inset 0 1px 0 rgba(255, 255, 255, .14); }
 .btn-in { background: var(--in); color: #04231a; }
 .btn-out { background: var(--out); color: #2a0605; }
 .btn-ghost { background: var(--panel-2); color: var(--ink); border-color: var(--line); }
@@ -119,7 +133,9 @@ h1, h2, h3 { font-family: var(--serif); }
 .auth-card { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
   box-shadow: var(--shadow); padding: 34px 30px; width: 100%; max-width: 392px; }
 .auth-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; border-radius: 14px 14px 0 0;
-  background: linear-gradient(90deg, var(--gold), var(--teal)); }
+  background: var(--brand-grad); background-size: 220% 100%; animation: brandShift 9s linear infinite; }
+@keyframes brandShift { to { background-position: 220% 0; } }
+@media (prefers-reduced-motion: reduce) { .auth-card::before, .modal-box::before, .brand-strip::after { animation: none !important; } }
 .auth-brand { text-align: center; margin-bottom: 20px; }
 .auth-brand h1 { margin: 12px 0 3px; font-size: 20px; color: var(--ink); }
 .auth-brand p { margin: 0; color: var(--teal); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; }
@@ -136,9 +152,12 @@ h1, h2, h3 { font-family: var(--serif); }
 
 /* ---------- Topbar + status rail ---------- */
 /* Topbar = "letterhead bar" — selalu gelap di kedua tema untuk identitas konsisten. */
-.topbar { background: linear-gradient(180deg, #0c1c31, #0a1526); color: #e7eefb; display: flex; align-items: center;
-  justify-content: space-between; padding: 10px 18px; gap: 12px; position: sticky; top: 0; z-index: 20;
-  border-bottom: 1px solid #21406a; }
+.topbar { background: linear-gradient(180deg, #0b1a30, #070f1e); color: #e7eefb; display: flex; align-items: center;
+  justify-content: space-between; padding: 11px 18px; gap: 12px; position: sticky; top: 0; z-index: 20;
+  border-bottom: 1px solid #14294a; }
+.topbar::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+  background: var(--brand-grad); background-size: 220% 100%; animation: brandShift 9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .topbar::after { animation: none; } }
 .topbar-left { display: flex; align-items: center; gap: 11px; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.2; }
 .brand-text strong { font-family: var(--serif); font-size: 16px; color: #f3f6fc; }
@@ -180,18 +199,25 @@ h1, h2, h3 { font-family: var(--serif); }
 
 /* ---------- Kartu (dengan corner ticks) ---------- */
 .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px; }
-.card { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
-  box-shadow: var(--shadow); padding: 16px 18px; display: flex; flex-direction: column; gap: 5px; }
+.card { position: relative; overflow: hidden; background: linear-gradient(180deg, var(--panel), var(--panel-2));
+  border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, .04); padding: 17px 19px;
+  display: flex; flex-direction: column; gap: 6px; transition: border-color .18s, box-shadow .18s; }
+.card:hover { border-color: var(--teal-dim); box-shadow: var(--shadow), 0 0 0 1px var(--teal-dim), 0 0 22px rgba(55, 220, 203, .12); }
 .tick::before, .tick::after { content: ""; position: absolute; width: 11px; height: 11px; opacity: .7; }
 .tick::before { top: 6px; left: 6px; border-left: 1.5px solid var(--teal); border-top: 1.5px solid var(--teal); }
 .tick::after { bottom: 6px; right: 6px; border-right: 1.5px solid var(--teal); border-bottom: 1.5px solid var(--teal); }
-.card-label { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
-.card-value { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 25px; font-weight: 700; letter-spacing: -.5px; }
+.card-label { color: var(--muted); font-family: var(--mono); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; }
+.card-value { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 26px; font-weight: 700; letter-spacing: -.5px; }
 .card-in .card-value { color: var(--in); } .card-in .tick::before, .card-in .tick::after { border-color: var(--in); }
 .card-out .card-value { color: var(--out); } .card-out .tick::before, .card-out .tick::after { border-color: var(--out); }
-.card-balance { background: linear-gradient(180deg, var(--panel), var(--panel-2)); }
-.card-balance .card-value { color: var(--teal); text-shadow: 0 0 18px var(--glow); }
+/* Kartu hero: Saldo Akhir — "readout" terminal dengan strip merek */
+.card-balance { background: linear-gradient(160deg, var(--panel-2), var(--panel)); border-color: var(--teal-dim); }
+.card-balance::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px;
+  background: var(--brand-grad); background-size: 220% 100%; animation: brandShift 9s linear infinite; }
+.card-balance .card-value { color: var(--teal); text-shadow: 0 0 22px var(--glow); font-size: 29px; }
 .card-balance .tick::before, .card-balance .tick::after { border-color: var(--gold); }
+@media (prefers-reduced-motion: reduce) { .card-balance::before { animation: none; } }
 
 /* ---------- Toolbar ---------- */
 .toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -240,7 +266,8 @@ h1, h2, h3 { font-family: var(--serif); }
 /* ---------- Modal ---------- */
 .modal { position: fixed; inset: 0; background: rgba(4, 10, 20, .68); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 50; }
 .modal-box { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 22px; width: 100%; max-width: 430px; box-shadow: var(--shadow); max-height: 92vh; overflow-y: auto; }
-.modal-box::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: linear-gradient(90deg, var(--gold), var(--teal)); }
+.modal-box::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: var(--brand-grad);
+  background-size: 220% 100%; animation: brandShift 9s linear infinite; }
 .modal-box h3 { margin: 0 0 16px; color: var(--ink); }
 .modal-box h4 { margin: 18px 0 10px; font-size: 14px; font-family: var(--sans); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
