@@ -66,10 +66,22 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 // 404 khusus API supaya tidak mengembalikan HTML
 app.use('/api', (req, res) => res.status(404).json({ error: 'Endpoint tidak ditemukan.' }));
 
-// Penanganan error terpusat
+// Penanganan error terpusat — hormati status error yang sudah diset (mis. body-parser
+// memberi 413 saat bukti melebihi 8mb, atau 400 saat JSON rusak), jangan paksa semua ke 500.
 app.use((err, req, res, next) => {
-  console.error(err);
-  res.status(500).json({ error: 'Terjadi kesalahan di server.' });
+  const status = err.status || err.statusCode || 500;
+  if (status >= 500) console.error(err); // hanya error server sungguhan yang perlu dicatat
+  let message;
+  if (status === 413) message = 'Data yang dikirim terlalu besar (mis. bukti melebihi batas ukuran).';
+  else if (err.type === 'entity.parse.failed') message = 'Format data (JSON) tidak valid.';
+  else if (status < 500) message = err.message || 'Permintaan tidak valid.';
+  else message = 'Terjadi kesalahan di server.';
+  res.status(status).json({ error: message });
+});
+
+// Jangan biarkan promise rejection tak tertangani menjatuhkan proses; cukup catat.
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandledRejection:', reason);
 });
 
 async function start() {

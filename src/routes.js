@@ -1,11 +1,18 @@
 'use strict';
 
 const express = require('express');
-const { query } = require('./db');
+const { query, withTransaction } = require('./db');
 const { requireAuth } = require('./auth');
 
 const router = express.Router();
 router.use(requireAuth); // semua route di bawah ini butuh login
+
+// Validasi parameter :id sekali di sini agar id non-angka (mis. /api/books/abc)
+// menghasilkan 400 yang jelas, bukan 500 dari Postgres ("invalid input syntax for integer").
+router.param('id', (req, res, next, val) => {
+  if (!/^\d+$/.test(val)) return res.status(400).json({ error: 'ID tidak valid.' });
+  next();
+});
 
 // ---------- Helper ----------
 const num = (v) => Number(v); // BIGINT dikembalikan sebagai string oleh pg -> jadikan number
@@ -20,7 +27,12 @@ function parseAmount(v) {
 }
 
 function validDate(s) {
-  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  // Date.parse tidak cukup: V8 "menggulung" tanggal mustahil (31 April -> 1 Mei),
+  // jadi kita cek komponennya kembali agar 2026-04-31 / 2026-02-30 / 29 Feb non-kabisat ditolak.
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
 }
 
 // Rentang tanggal untuk filter bulan "YYYY-MM" -> [awal, awalBulanBerikutnya)
@@ -45,10 +57,12 @@ router.get('/backup', async (req, res, next) => {
   try {
     const books = (await query('SELECT id, name, saldo_awal, bank_info, created_at FROM books ORDER BY id')).rows
       .map((b) => ({ ...b, saldo_awal: num(b.saldo_awal) }));
+    // Sertakan kolom "bukti" (data URL lampiran) supaya cadangan benar-benar LENGKAP —
+    // tanpa ini foto struk/nota tidak ikut ter-backup dan hilang bila database hilang.
     const transactions = (await query(
-      'SELECT id, book_id, type, tanggal, jumlah, keterangan, kategori, created_at FROM transactions ORDER BY id'
+      'SELECT id, book_id, type, tanggal, jumlah, keterangan, kategori, bukti, created_at FROM transactions ORDER BY id'
     )).rows.map((t) => ({ ...t, jumlah: num(t.jumlah) }));
-    res.json({ app: 'sintesa-keuangan', version: 1, books, transactions });
+    res.json({ app: 'sintesa-keuangan', version: 2, books, transactions });
   } catch (e) {
     next(e);
   }
@@ -134,8 +148,12 @@ router.delete('/books/:id', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!(await bookExists(id))) return res.status(404).json({ error: 'Buku tidak ditemukan.' });
-    await query('DELETE FROM transactions WHERE book_id = $1', [id]);
-    await query('DELETE FROM books WHERE id = $1', [id]);
+    // Atomik: hapus transaksi + rekening dalam satu transaksi DB. Bila gagal di tengah,
+    // ROLLBACK memulihkan keduanya (mencegah transaksi hilang sementara rekening tetap ada).
+    await withTransaction(async (q) => {
+      await q('DELETE FROM transactions WHERE book_id = $1', [id]);
+      await q('DELETE FROM books WHERE id = $1', [id]);
+    });
     res.json({ ok: true });
   } catch (e) {
     next(e);
@@ -279,21 +297,27 @@ router.post('/books/:id/transactions/bulk', async (req, res, next) => {
     if (items.length === 0) return res.status(400).json({ error: 'Tidak ada baris untuk diimpor.' });
     if (items.length > 5000) return res.status(400).json({ error: 'Maksimal 5000 baris per impor.' });
 
-    let inserted = 0;
+    // Atomik: semua baris valid masuk sebagai satu transaksi DB. Bila proses gagal di
+    // tengah, ROLLBACK membatalkan seluruhnya — sehingga impor ulang tidak menghasilkan
+    // separuh data + duplikat. Baris tak valid dilewati (dilaporkan), bukan menggagalkan impor.
     const errors = [];
-    for (let i = 0; i < items.length; i++) {
-      const { type, tanggal, jumlah, keterangan, kategori } = readTxBody(items[i]);
-      if (!type || !validDate(tanggal) || jumlah === null) {
-        errors.push({ baris: i + 1, alasan: 'jenis/tanggal/jumlah tidak valid' });
-        continue;
+    const inserted = await withTransaction(async (q) => {
+      let ok = 0;
+      for (let i = 0; i < items.length; i++) {
+        const { type, tanggal, jumlah, keterangan, kategori } = readTxBody(items[i]);
+        if (!type || !validDate(tanggal) || jumlah === null) {
+          errors.push({ baris: i + 1, alasan: 'jenis/tanggal/jumlah tidak valid' });
+          continue;
+        }
+        await q(
+          `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [id, type, tanggal, jumlah, keterangan, kategori, req.session.userId]
+        );
+        ok++;
       }
-      await query(
-        `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [id, type, tanggal, jumlah, keterangan, kategori, req.session.userId]
-      );
-      inserted++;
-    }
+      return ok;
+    });
     res.status(201).json({ inserted, gagal: errors.length, errors: errors.slice(0, 20) });
   } catch (e) {
     next(e);

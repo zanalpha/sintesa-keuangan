@@ -14,7 +14,7 @@ services:
     runtime: node
     plan: free # ganti ke "starter" agar tidak "tidur" saat tidak dipakai
     region: singapore
-    buildCommand: npm install
+    buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /healthz
     envVars:

@@ -2,7 +2,7 @@
 
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { query } = require('./db');
+const { query, withTransaction } = require('./db');
 
 const router = express.Router();
 
@@ -180,6 +180,28 @@ router.get('/users', requireAuth, async (req, res, next) => {
   try {
     const { rows } = await query('SELECT id, username, name, created_at FROM users ORDER BY id');
     res.json({ users: rows });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Hapus pengguna. Tidak boleh menghapus diri sendiri atau pengguna terakhir.
+// Referensi created_by pada books/transactions di-null-kan agar tidak melanggar foreign key.
+router.delete('/users/:id', requireAuth, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'ID tidak valid.' });
+    if (id === req.session.userId) return res.status(400).json({ error: 'Tidak bisa menghapus akun Anda sendiri.' });
+    const n = await countUsers();
+    if (n <= 1) return res.status(400).json({ error: 'Minimal harus ada satu pengguna.' });
+    const { rows } = await query('SELECT id FROM users WHERE id = $1', [id]);
+    if (!rows.length) return res.status(404).json({ error: 'Pengguna tidak ditemukan.' });
+    await withTransaction(async (q) => {
+      await q('UPDATE books SET created_by = NULL WHERE created_by = $1', [id]);
+      await q('UPDATE transactions SET created_by = NULL WHERE created_by = $1', [id]);
+      await q('DELETE FROM users WHERE id = $1', [id]);
+    });
+    res.json({ ok: true });
   } catch (e) {
     next(e);
   }

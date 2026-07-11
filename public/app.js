@@ -23,8 +23,21 @@ function todayISO() {
 }
 function pad2(n) { return String(n).padStart(2, '0'); }
 function formatMoneyInput(e) {
-  const d = e.target.value.replace(/\D/g, '');
-  e.target.value = d ? new Intl.NumberFormat('id-ID').format(Number(d)) : '';
+  const el = e.target;
+  // Hitung berapa digit ada SEBELUM kursor, agar posisi kursor bisa dipulihkan setelah
+  // pemformatan ulang (jika tidak, kursor selalu melompat ke ujung saat mengedit di tengah).
+  const caret = el.selectionEnd;
+  const digitsBeforeCaret = caret == null ? null : el.value.slice(0, caret).replace(/\D/g, '').length;
+  const d = el.value.replace(/\D/g, '');
+  el.value = d ? new Intl.NumberFormat('id-ID').format(Number(d)) : '';
+  if (digitsBeforeCaret == null) return;
+  // Tempatkan kursor tepat setelah digit ke-N pada string terformat yang baru.
+  let pos = 0, seen = 0;
+  while (pos < el.value.length && seen < digitsBeforeCaret) {
+    if (/\d/.test(el.value[pos])) seen++;
+    pos++;
+  }
+  try { el.setSelectionRange(pos, pos); } catch (_) { /* abaikan bila tak didukung */ }
 }
 function escapeHtml(s) {
   return String(s || '').replace(/[&<>"']/g, (c) =>
@@ -226,7 +239,6 @@ function render() {
 
   if (state.view === 'besar') renderBukuBesar();
   if (state.view === 'analitik') renderAnalytics();
-  buildPrint(book, scopeSaldoAwal, totalMasuk, totalKeluar);
 }
 
 function renderBookInfo({ analitik, book, scopeBook, saldoAwal, txCount }) {
@@ -262,8 +274,8 @@ function renderColumn(type, list) {
         <td class="c-amt">${rupiah(t.jumlah)}</td>
         <td>${escapeHtml(t.keterangan) || '<span class="muted">—</span>'}${t.kategori ? ` <span class="muted">· ${escapeHtml(t.kategori)}</span>` : ''}${t.has_bukti ? ` <button type="button" class="bukti-chip" data-bukti="${t.id}" title="Lihat bukti">📎 bukti</button>` : ''}</td>
         <td class="c-act"><div class="row-actions">
-          <button class="icon-btn" title="Ubah" data-edit="${t.id}">✎</button>
-          <button class="icon-btn" title="Hapus" data-del="${t.id}">🗑</button>
+          <button class="icon-btn" title="Ubah" aria-label="Ubah transaksi ${tanggalIndo(t.tanggal)} ${rupiah(t.jumlah)}" data-edit="${t.id}">✎</button>
+          <button class="icon-btn" title="Hapus" aria-label="Hapus transaksi ${tanggalIndo(t.tanggal)} ${rupiah(t.jumlah)}" data-del="${t.id}">🗑</button>
         </div></td>`;
       tbody.appendChild(tr);
     });
@@ -335,7 +347,11 @@ function renderBukuBesar() {
 
 function setView(view) {
   state.view = view;
-  document.querySelectorAll('.vt-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
+  document.querySelectorAll('.vt-btn').forEach((b) => {
+    const on = b.dataset.view === view;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
   $('ledger-view').classList.toggle('hidden', view !== 'catatan');
   $('besar-view').classList.toggle('hidden', view !== 'besar');
   $('analytics-view').classList.toggle('hidden', view !== 'analitik');
@@ -422,6 +438,7 @@ function closeBukti() { $('bukti-modal').classList.add('hidden'); }
 //  MODAL TRANSAKSI
 // ============================================================
 function openTxModal(type, tx) {
+  lastFocused = document.activeElement;
   const f = $('tx-form');
   f.reset();
   $('tx-error').textContent = '';
@@ -437,6 +454,7 @@ function openTxModal(type, tx) {
   const label = type === 'masuk' ? 'Pemasukan' : 'Pengeluaran';
   $('tx-modal-title').textContent = (tx ? 'Ubah ' : 'Tambah ') + label;
   $('tx-submit').textContent = tx ? 'Simpan Perubahan' : 'Simpan';
+  modalDirty = false;
   $('tx-modal').classList.remove('hidden');
   setTimeout(() => f.jumlah.focus(), 50);
 }
@@ -485,6 +503,7 @@ $('tx-form').addEventListener('submit', async (e) => {
 //  PENGATURAN / BUKU
 // ============================================================
 function openBookModal(book) {
+  lastFocused = document.activeElement;
   const f = $('book-form');
   f.reset();
   $('book-error').textContent = '';
@@ -495,6 +514,7 @@ function openBookModal(book) {
   $('book-modal-title').textContent = book ? 'Pengaturan Rekening' : 'Rekening Baru';
   // Tombol hapus hanya saat mengubah rekening yang ada, dan bila lebih dari satu rekening.
   $('book-delete').classList.toggle('hidden', !(book && state.books.length > 1));
+  modalDirty = false;
   $('book-modal').classList.remove('hidden');
   setTimeout(() => f.name.focus(), 50);
 }
@@ -532,14 +552,30 @@ async function deleteBook() {
 //  PENGGUNA
 // ============================================================
 async function openUsers() {
+  lastFocused = document.activeElement;
   closeMenu();
   try {
     const { users } = await api('GET', '/api/auth/users');
-    $('users-list').innerHTML = users.map((u) =>
-      `<li><span>${escapeHtml(u.name)}</span><span class="u-username">@${escapeHtml(u.username)}</span></li>`).join('');
+    $('users-list').innerHTML = users.map((u) => {
+      const self = state.user && u.id === state.user.id;
+      const del = self
+        ? '<span class="u-self">(Anda)</span>'
+        : `<button type="button" class="icon-btn u-del" data-deluser="${u.id}" aria-label="Hapus pengguna ${escapeHtml(u.name)}" title="Hapus pengguna">🗑</button>`;
+      return `<li><span class="u-name">${escapeHtml(u.name)}</span><span class="u-username">@${escapeHtml(u.username)}</span>${del}</li>`;
+    }).join('');
     $('add-user-error').textContent = '';
     $('add-user-form').reset();
     $('users-modal').classList.remove('hidden');
+    setTimeout(() => $('add-user-form').name.focus(), 50);
+  } catch (err) { toast(err.message, true); }
+}
+
+async function deleteUser(id, name) {
+  if (!confirm(`Hapus pengguna "${name}"? Akun ini tidak bisa dipulihkan.`)) return;
+  try {
+    await api('DELETE', `/api/auth/users/${id}`);
+    toast('Pengguna dihapus.');
+    await openUsers();
   } catch (err) { toast(err.message, true); }
 }
 $('add-user-form').addEventListener('submit', async (e) => {
@@ -555,10 +591,12 @@ $('add-user-form').addEventListener('submit', async (e) => {
 
 // ---------- Ganti password ----------
 function openPassword() {
+  lastFocused = document.activeElement;
   closeMenu();
   $('password-form').reset();
   $('password-error').textContent = '';
   $('password-modal').classList.remove('hidden');
+  setTimeout(() => $('password-form').current_password.focus(), 50);
 }
 $('password-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -590,11 +628,13 @@ async function backupData() {
 //  IMPOR CSV
 // ============================================================
 function openImport() {
+  lastFocused = document.activeElement;
   closeMenu();
   $('import-error').textContent = '';
   $('import-result').textContent = '';
   $('import-file').value = '';
   $('import-modal').classList.remove('hidden');
+  setTimeout(() => $('import-file').focus(), 50);
 }
 function parseCsv(text) {
   text = text.replace(/^﻿/, '');
@@ -621,7 +661,8 @@ function monthNum(name) {
 function normDate(s) {
   s = String(s).trim();
   let m;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // ISO dengan pemisah "-" atau "/", boleh tanpa nol di depan: 2026-07-11, 2026/7/1.
+  if ((m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/))) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
   if ((m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/))) return `${m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
   if ((m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2})$/))) return `20${m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
   if ((m = s.match(/^(\d{1,2})[\-\s]([A-Za-z]{3,})[\-\s](\d{2,4})$/))) {
@@ -656,7 +697,9 @@ function rowsToTransactions(rows) {
     if (/masuk|pemasukan|\bin\b/.test(jenis)) type = 'masuk';
     else if (/keluar|pengeluaran|biaya|\bout\b/.test(jenis)) type = 'keluar';
     const tanggal = normDate(get('tanggal'));
-    const jumlah = get('jumlah').replace(/[^\d]/g, '');
+    // Buang dulu gugus sen di akhir (mis. ",00" / ".00") SEBELUM menghapus pemisah ribuan,
+    // agar "1.500.000,00" -> 1500000 (bukan 150000000 alias 100x lipat). "1.500.000" tetap utuh.
+    const jumlah = get('jumlah').trim().replace(/[.,]\d{1,2}$/, '').replace(/[^\d]/g, '');
     if (!type || !tanggal || !jumlah) continue;
     out.push({ type, tanggal, jumlah, keterangan: get('keterangan'), kategori: get('kategori') });
   }
@@ -716,20 +759,160 @@ function exportCsv() {
 }
 function slug(s) { return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
 
-function buildPrint(book, saldoAwal, totalMasuk, totalKeluar) {
-  const viewName = state.view === 'besar' ? 'Buku Besar' : state.view === 'analitik' ? 'Analitik' : 'Catatan Kas';
-  let periode = 'Semua periode';
-  if (state.view === 'besar') {
-    const d = computeBesar();
-    if (d.from || d.to) periode = `${d.from ? tanggalIndo(d.from) : 'awal'} — ${d.to ? tanggalIndo(d.to) : 'kini'}`;
-  } else if (state.month) periode = labelBulan(state.month);
-  const scopeName = state.view === 'analitik' ? 'Gabungan Semua Rekening' : (book ? book.name : '');
-  $('print-head').innerHTML = `
-    <div class="ph-company">PT SINTESA DATA SEMESTA</div>
-    <div class="ph-sub">Sistem Pencatatan Keuangan${state.view !== 'analitik' && book && book.bank_info ? ' · ' + escapeHtml(book.bank_info) : ''}</div>
-    <div class="ph-title">Laporan ${viewName} — ${escapeHtml(scopeName)}</div>
-    <div class="ph-meta">Periode: ${periode} · Dicetak: ${tanggalIndo(todayISO())}</div>`;
-  $('print-foot').innerHTML = `<div class="sign">Mengetahui,<div class="sign-line">${escapeHtml(state.user ? state.user.name : '')}</div></div>`;
+// Hitung ledger kronologis (saldo berjalan) untuk kumpulan transaksi & periode apa pun.
+// Transaksi sebelum `from` dilipat ke dalam saldo pembuka agar saldo berjalan tetap kontinu.
+function computeLedger(scopeTx, saldoAwal, from, to) {
+  const sorted = [...scopeTx].sort((a, b) =>
+    a.tanggal < b.tanggal ? -1 : a.tanggal > b.tanggal ? 1 : a.id - b.id);
+  let opening = saldoAwal;
+  for (const t of sorted) if (from && t.tanggal < from) opening += t.type === 'masuk' ? t.jumlah : -t.jumlah;
+  let running = opening, tMasuk = 0, tKeluar = 0;
+  const rows = [];
+  for (const t of sorted) {
+    if (from && t.tanggal < from) continue;
+    if (to && t.tanggal > to) continue;
+    running += t.type === 'masuk' ? t.jumlah : -t.jumlah;
+    if (t.type === 'masuk') tMasuk += t.jumlah; else tKeluar += t.jumlah;
+    rows.push({ ...t, saldo: running });
+  }
+  return { opening, rows, tMasuk, tKeluar, saldoAkhir: running };
+}
+
+// ============================================================
+//  LAPORAN CETAK / PDF — dokumen resmi lengkap
+// ============================================================
+function buildPrintReport() {
+  const analitik = state.view === 'analitik';
+  const scopeBook = analitik ? (anaScopeId() ? state.books.find((b) => b.id === anaScopeId()) : null) : curBook();
+  const scopeTx = analitik ? anaTx() : state.transactions;
+  const saldoAwal = analitik ? anaSaldoAwal() : (scopeBook ? scopeBook.saldo_awal : 0);
+  const scopeName = analitik && !scopeBook ? 'Gabungan Semua Rekening' : (scopeBook ? scopeBook.name : '—');
+  const bankInfo = scopeBook ? (scopeBook.bank_info || '') : '';
+
+  // Periode mengikuti filter view yang sedang dilihat: Buku Besar = rentang tanggal,
+  // Catatan = bulan terpilih, Analitik = seluruh periode.
+  let from = '', to = '', periodLabel = 'Seluruh periode';
+  if (state.view === 'besar' && (state.besarFrom || state.besarTo)) {
+    from = state.besarFrom; to = state.besarTo;
+    periodLabel = `${from ? tanggalIndo(from) : 'awal'} — ${to ? tanggalIndo(to) : 'kini'}`;
+  } else if (state.view === 'catatan' && state.month) {
+    from = `${state.month}-01`; to = `${state.month}-31`;
+    periodLabel = labelBulan(state.month);
+  }
+
+  const jenis = analitik ? 'Rekapitulasi Keuangan' : state.view === 'besar' ? 'Buku Besar' : 'Buku Kas';
+  const L = computeLedger(scopeTx, saldoAwal, from, to);
+  const cetakTgl = tanggalIndo(todayISO());
+  const docNo = `SDS/LK/${todayISO().replace(/-/g, '')}`;
+
+  // Rekap per kategori (dalam periode).
+  const breakdown = (type) => {
+    const m = new Map();
+    for (const r of L.rows) if (r.type === type) {
+      const k = r.kategori || 'Tanpa kategori';
+      m.set(k, (m.get(k) || 0) + r.jumlah);
+    }
+    const arr = [...m.entries()].map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v);
+    return { arr, tot: arr.reduce((s, x) => s + x.v, 0) };
+  };
+  const bdIn = breakdown('masuk'), bdOut = breakdown('keluar');
+  const bdRows = (bd) => bd.arr.length
+    ? bd.arr.map((x) => `<tr><td>${escapeHtml(x.k)}</td><td class="num">${rupiah(x.v)}</td><td class="num">${bd.tot ? Math.round((x.v / bd.tot) * 100) : 0}%</td></tr>`).join('') +
+      `<tr class="total"><td>TOTAL</td><td class="num">${rupiah(bd.tot)}</td><td class="num">100%</td></tr>`
+    : `<tr><td colspan="3" style="color:#666;font-style:italic">Tidak ada</td></tr>`;
+
+  // Baris ledger.
+  const openLabel = from ? `Saldo awal per ${tanggalIndo(from)}` : 'SALDO AWAL';
+  let ledgerBody = `<tr class="opening"><td class="c-no"></td><td>—</td><td colspan="2">${openLabel}</td><td class="num"></td><td class="num"></td><td class="num">${rupiah(L.opening)}</td></tr>`;
+  if (L.rows.length === 0) {
+    ledgerBody += `<tr><td colspan="7" class="pr-empty">Tidak ada transaksi pada periode ini.</td></tr>`;
+  } else {
+    ledgerBody += L.rows.map((r, i) => `<tr>
+      <td class="c-no">${i + 1}</td>
+      <td>${tanggalIndo(r.tanggal)}</td>
+      <td>${escapeHtml(r.keterangan) || '—'}</td>
+      <td>${escapeHtml(r.kategori) || '—'}</td>
+      <td class="num r-in">${r.type === 'masuk' ? rupiah(r.jumlah) : ''}</td>
+      <td class="num r-out">${r.type === 'keluar' ? rupiah(r.jumlah) : ''}</td>
+      <td class="num">${rupiah(r.saldo)}</td></tr>`).join('');
+  }
+
+  const html = `
+    <header class="pr-head">
+      <div class="pr-brand">
+        <div class="pr-mark">SDS</div>
+        <div>
+          <div class="pr-co-name">PT SINTESA DATA SEMESTA</div>
+          <div class="pr-co-sub">Sistem Pencatatan Keuangan</div>
+        </div>
+      </div>
+      <div class="pr-docmeta">
+        <div>No. Dokumen: <b>${docNo}</b></div>
+        <div>Tanggal Cetak: <b>${cetakTgl}</b></div>
+      </div>
+    </header>
+
+    <div class="pr-title">Laporan ${jenis}</div>
+    <div class="pr-subtitle">${escapeHtml(scopeName)}</div>
+
+    <table class="pr-meta"><tbody>
+      <tr><td class="k">Rekening</td><td class="v">: ${escapeHtml(scopeName)}</td></tr>
+      ${bankInfo ? `<tr><td class="k">No. Rekening / Bank</td><td class="v">: ${escapeHtml(bankInfo)}</td></tr>` : ''}
+      <tr><td class="k">Periode</td><td class="v">: ${periodLabel}</td></tr>
+      <tr><td class="k">Jumlah Transaksi</td><td class="v">: ${L.rows.length}</td></tr>
+    </tbody></table>
+
+    <section class="pr-summary">
+      <div class="pr-sum-box"><div class="lbl">Saldo Awal</div><div class="val">${rupiah(L.opening)}</div></div>
+      <div class="pr-sum-box pos"><div class="lbl">Total Pemasukan</div><div class="val">${rupiah(L.tMasuk)}</div></div>
+      <div class="pr-sum-box neg"><div class="lbl">Total Pengeluaran</div><div class="val">${rupiah(L.tKeluar)}</div></div>
+      <div class="pr-sum-box saldo"><div class="lbl">Saldo Akhir</div><div class="val">${rupiah(L.saldoAkhir)}</div></div>
+    </section>
+
+    <table class="pr-ledger">
+      <thead><tr>
+        <th class="c-no">No</th><th>Tanggal</th><th>Keterangan</th><th>Kategori</th>
+        <th class="num">Pemasukan</th><th class="num">Pengeluaran</th><th class="num">Saldo</th>
+      </tr></thead>
+      <tbody>${ledgerBody}</tbody>
+      <tfoot><tr>
+        <td colspan="4">TOTAL</td>
+        <td class="num">${rupiah(L.tMasuk)}</td>
+        <td class="num">${rupiah(L.tKeluar)}</td>
+        <td class="num">${rupiah(L.saldoAkhir)}</td>
+      </tr></tfoot>
+    </table>
+
+    <section class="pr-breakdown">
+      <div class="pr-bd">
+        <h4>Rekap Pemasukan per Kategori</h4>
+        <table class="pr-bd-table"><tbody>${bdRows(bdIn)}</tbody></table>
+      </div>
+      <div class="pr-bd">
+        <h4>Rekap Pengeluaran per Kategori</h4>
+        <table class="pr-bd-table"><tbody>${bdRows(bdOut)}</tbody></table>
+      </div>
+    </section>
+
+    <section class="pr-sign">
+      <div class="pr-place">………………………, ${cetakTgl}</div>
+      <div class="pr-sign-cols">
+        <div class="pr-sign-col">
+          <div class="pr-sign-role">Dibuat oleh,</div>
+          <div class="pr-sign-name">${escapeHtml(state.user ? state.user.name : '')}</div>
+          <div class="pr-sign-sub">Petugas Pencatatan</div>
+        </div>
+        <div class="pr-sign-col">
+          <div class="pr-sign-role">Mengetahui,</div>
+          <div class="pr-sign-name">&nbsp;</div>
+          <div class="pr-sign-sub">Pimpinan</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="pr-pagefoot">${docNo} · PT Sintesa Data Semesta — Sistem Pencatatan Keuangan · Dicetak ${cetakTgl}</div>`;
+
+  $('print-report').innerHTML = html;
 }
 
 // ============================================================
@@ -737,8 +920,46 @@ function buildPrint(book, saldoAwal, totalMasuk, totalKeluar) {
 // ============================================================
 function toggleMenu() { $('menu-dropdown').classList.toggle('hidden'); }
 function closeMenu() { $('menu-dropdown').classList.add('hidden'); }
+
+// Fokus terakhir sebelum modal dibuka (untuk dikembalikan saat ditutup) + penanda "ada perubahan".
+let lastFocused = null;
+let modalDirty = false;
+
 function closeModals() {
   ['tx-modal', 'book-modal', 'import-modal', 'users-modal', 'password-modal'].forEach((id) => $(id).classList.add('hidden'));
+  modalDirty = false;
+  if (lastFocused && typeof lastFocused.focus === 'function') {
+    try { lastFocused.focus(); } catch (_) {}
+    lastFocused = null;
+  }
+}
+
+// Apakah modal yang bisa mengubah data (transaksi/rekening) sedang terbuka dengan perubahan?
+function isEditModalDirty() {
+  if (!$('tx-modal').classList.contains('hidden')) return modalDirty || buktiState.changed;
+  if (!$('book-modal').classList.contains('hidden')) return modalDirty;
+  return false;
+}
+
+// Penutupan "tak sengaja" (klik latar / Esc): konfirmasi bila ada perubahan belum disimpan.
+function requestCloseModals() {
+  if (isEditModalDirty() && !confirm('Ada perubahan yang belum disimpan. Tutup dan buang perubahan?')) return;
+  closeModals();
+}
+
+// Jerat fokus (Tab) di dalam modal yang terbuka agar tidak "bocor" ke belakang.
+function trapModalTab(e) {
+  const open = [...document.querySelectorAll('.modal')].filter((m) => !m.classList.contains('hidden'));
+  const openM = open[open.length - 1]; // modal teratas (mis. penampil bukti di atas modal transaksi)
+  if (!openM) return;
+  const list = [...openM.querySelectorAll(
+    'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+  )].filter((el) => el.offsetParent !== null);
+  if (!list.length) return;
+  const first = list[0], last = list[list.length - 1];
+  if (!openM.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+  else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 }
 
 function wireStaticHandlers() {
@@ -752,7 +973,11 @@ function wireStaticHandlers() {
       const tx = state.transactions.find((t) => t.id === Number(editId));
       if (tx) openTxModal(tx.type, tx);
     } else if (delId) {
-      if (!confirm('Hapus transaksi ini?')) return;
+      const tx = state.transactions.find((t) => t.id === Number(delId));
+      const label = tx
+        ? `${tx.type === 'masuk' ? 'pemasukan' : 'pengeluaran'} ${rupiah(tx.jumlah)} tanggal ${tanggalIndo(tx.tanggal)}`
+        : 'ini';
+      if (!confirm(`Hapus transaksi ${label}? Tindakan ini tidak bisa dibatalkan.`)) return;
       try { await api('DELETE', `/api/transactions/${delId}`); toast('Transaksi dihapus.'); await loadData(); }
       catch (err) { toast(err.message, true); }
     }
@@ -794,7 +1019,9 @@ function wireStaticHandlers() {
   $('import-btn').addEventListener('click', openImport);
   $('template-btn').addEventListener('click', downloadTemplate);
   $('export-btn').addEventListener('click', exportCsv);
-  $('print-btn').addEventListener('click', () => window.print());
+  $('print-btn').addEventListener('click', () => { buildPrintReport(); window.print(); });
+  // Bangun ulang laporan bila pengguna mencetak lewat Ctrl/Cmd+P (bukan hanya tombol Cetak).
+  window.addEventListener('beforeprint', () => { if (state.user) buildPrintReport(); });
 
   document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeModals));
   // Penampil bukti punya tombol tutup sendiri agar tak menutup modal transaksi di baliknya.
@@ -802,21 +1029,36 @@ function wireStaticHandlers() {
   document.querySelectorAll('.modal').forEach((m) =>
     m.addEventListener('click', (e) => {
       if (e.target !== m) return;
-      if (m.id === 'bukti-modal') closeBukti(); else closeModals();
+      if (m.id === 'bukti-modal') closeBukti(); else requestCloseModals();
     }));
   document.addEventListener('click', () => closeMenu());
 
-  // Pintasan keyboard: Esc tutup; "n" transaksi baru; "/" fokus pencarian.
+  // Penanda "ada perubahan" untuk modal transaksi & rekening (agar penutupan tak sengaja mengonfirmasi).
+  $('tx-form').addEventListener('input', () => { modalDirty = true; });
+  $('book-form').addEventListener('input', () => { modalDirty = true; });
+
+  // Hapus pengguna dari daftar Kelola Pengguna.
+  $('users-list').addEventListener('click', (e) => {
+    const id = e.target.dataset.deluser;
+    if (!id) return;
+    const li = e.target.closest('li');
+    deleteUser(Number(id), li ? li.querySelector('.u-name').textContent : '');
+  });
+
+  // Pintasan keyboard: Tab dijerat di modal; Esc tutup; "n"/"k" transaksi baru; "/" fokus pencarian.
   document.addEventListener('keydown', (e) => {
+    const modalOpen = [...document.querySelectorAll('.modal')].some((m) => !m.classList.contains('hidden'));
+    if (e.key === 'Tab' && modalOpen) { trapModalTab(e); return; }
     if (e.key === 'Escape') {
       if (!$('bukti-modal').classList.contains('hidden')) { closeBukti(); return; }
-      closeModals(); closeMenu(); return;
+      requestCloseModals(); closeMenu(); return;
     }
     const tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
-    if ([...document.querySelectorAll('.modal')].some((m) => !m.classList.contains('hidden'))) return;
+    if (modalOpen) return;
     if ($('app-view').classList.contains('hidden')) return;
     if (e.key === 'n' || e.key === 'N') { e.preventDefault(); openTxModal('masuk'); }
+    else if (e.key === 'k' || e.key === 'K') { e.preventDefault(); openTxModal('keluar'); }
     else if (e.key === '/' && state.view === 'catatan') { e.preventDefault(); $('search-input').focus(); }
   });
 }

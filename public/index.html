@@ -21,7 +21,7 @@
           <h2>Masuk</h2>
           <label>Username<input name="username" autocomplete="username" required /></label>
           <label>Password<input name="password" type="password" autocomplete="current-password" required /></label>
-          <p class="form-error" id="login-error"></p>
+          <p class="form-error" role="alert" id="login-error"></p>
           <button type="submit" class="btn btn-primary btn-block">Masuk</button>
         </form>
       </div>
@@ -93,9 +93,9 @@
         <!-- Toolbar -->
         <section class="toolbar">
           <div class="view-toggle" role="tablist" aria-label="Tampilan">
-            <button type="button" class="vt-btn active" data-view="catatan" role="tab">Catatan</button>
-            <button type="button" class="vt-btn" data-view="besar" role="tab">Buku Besar</button>
-            <button type="button" class="vt-btn" data-view="analitik" role="tab">Analitik</button>
+            <button type="button" class="vt-btn active" id="tab-catatan" data-view="catatan" role="tab" aria-selected="true" aria-controls="ledger-view">Catatan</button>
+            <button type="button" class="vt-btn" id="tab-besar" data-view="besar" role="tab" aria-selected="false" aria-controls="besar-view">Buku Besar</button>
+            <button type="button" class="vt-btn" id="tab-analitik" data-view="analitik" role="tab" aria-selected="false" aria-controls="analytics-view">Analitik</button>
           </div>
 
           <div class="tool-filters" id="tools-catatan">
@@ -133,7 +133,7 @@
         </section>
 
         <!-- ===== CATATAN (dua kolom) ===== -->
-        <section class="ledger" id="ledger-view">
+        <section class="ledger" id="ledger-view" role="tabpanel" aria-labelledby="tab-catatan">
           <div class="ledger-col">
             <div class="ledger-head ledger-head-in">
               <h2>PEMASUKAN</h2>
@@ -163,7 +163,7 @@
         </section>
 
         <!-- ===== BUKU BESAR (saldo berjalan) ===== -->
-        <section class="besar hidden" id="besar-view">
+        <section class="besar hidden" id="besar-view" role="tabpanel" aria-labelledby="tab-besar">
           <div class="panel">
             <div class="panel-head"><h2>Buku Besar — Saldo Berjalan</h2><span id="besar-range" class="muted"></span></div>
             <div class="table-wrap">
@@ -180,7 +180,7 @@
         </section>
 
         <!-- ===== ANALITIK ===== -->
-        <section class="analytics hidden" id="analytics-view">
+        <section class="analytics hidden" id="analytics-view" role="tabpanel" aria-labelledby="tab-analitik">
           <div class="chart-card">
             <h3>Saldo per Rekening</h3>
             <div id="rekening-summary" class="rek-summary"></div>
@@ -206,15 +206,16 @@
           </div>
           <p class="analytics-empty hidden" id="analytics-empty">Belum ada data untuk dianalisis.</p>
         </section>
-
-        <!-- Header/footer khusus cetak -->
-        <div class="print-only" id="print-head"></div>
-        <div class="print-only" id="print-foot"></div>
       </main>
     </div>
 
+    <!-- ======================= LAPORAN CETAK / PDF =======================
+         Dibangun oleh JavaScript (buildPrintReport) saat menekan "Cetak".
+         Hanya tampil di media cetak; seluruh UI aplikasi disembunyikan saat mencetak. -->
+    <div id="print-report" class="print-report" aria-hidden="true"></div>
+
     <!-- ======================= MODAL TRANSAKSI ======================= -->
-    <div id="tx-modal" class="modal hidden">
+    <div id="tx-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="tx-modal-title">
       <div class="modal-box">
         <h3 id="tx-modal-title">Tambah Transaksi</h3>
         <form id="tx-form">
@@ -233,14 +234,14 @@
               <button type="button" id="bukti-remove" class="btn btn-ghost btn-sm">Hapus</button>
             </span>
           </div>
-          <p class="form-error" id="tx-error"></p>
+          <p class="form-error" role="alert" id="tx-error"></p>
           <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary" id="tx-submit">Simpan</button></div>
         </form>
       </div>
     </div>
 
     <!-- ======================= MODAL PENGATURAN BUKU ======================= -->
-    <div id="book-modal" class="modal hidden">
+    <div id="book-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="book-modal-title">
       <div class="modal-box">
         <h3 id="book-modal-title">Pengaturan Rekening</h3>
         <form id="book-form">
@@ -248,7 +249,7 @@
           <label>Nama Rekening<input name="name" maxlength="100" required placeholder="mis. BCA / KOPRA MANDIRI" /></label>
           <label>Saldo Awal (Rp)<input name="saldo_awal" inputmode="numeric" autocomplete="off" placeholder="0" /></label>
           <label>Nomor Rekening / Bank<input name="bank_info" maxlength="200" placeholder="mis. BANK BCA 0562593452" /></label>
-          <p class="form-error" id="book-error"></p>
+          <p class="form-error" role="alert" id="book-error"></p>
           <div class="modal-actions">
             <button type="button" class="btn btn-danger btn-sm hidden" id="book-delete">🗑 Hapus Rekening</button>
             <button type="button" class="btn btn-ghost" data-close>Batal</button>
@@ -259,9 +260,9 @@
     </div>
 
     <!-- ======================= MODAL IMPOR ======================= -->
-    <div id="import-modal" class="modal hidden">
+    <div id="import-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="import-modal-title">
       <div class="modal-box">
-        <h3>Impor dari CSV</h3>
+        <h3 id="import-modal-title">Impor dari CSV</h3>
         <p class="muted">Unggah file CSV dengan kolom: <strong>Jenis, Tanggal, Jumlah, Keterangan, Kategori</strong>.
           Jenis diisi <em>Pemasukan</em>/<em>Pengeluaran</em> (atau masuk/keluar). Tanggal format <em>YYYY-MM-DD</em>.</p>
         <p><button type="button" id="template-btn" class="btn btn-ghost btn-sm">⬇ Unduh template</button></p>
@@ -269,16 +270,16 @@
           <input id="import-file" type="file" accept=".csv,text/csv" />
           <span>Pilih file CSV…</span>
         </label>
-        <p class="form-error" id="import-error"></p>
-        <p class="import-result" id="import-result"></p>
+        <p class="form-error" role="alert" id="import-error"></p>
+        <p class="import-result" id="import-result" role="status" aria-live="polite"></p>
         <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Tutup</button></div>
       </div>
     </div>
 
     <!-- ======================= MODAL PENAMPIL BUKTI ======================= -->
-    <div id="bukti-modal" class="modal hidden">
+    <div id="bukti-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="bukti-modal-title">
       <div class="modal-box bukti-box">
-        <h3>Bukti Transaksi</h3>
+        <h3 id="bukti-modal-title">Bukti Transaksi</h3>
         <div id="bukti-view-area" class="bukti-view-area"></div>
         <div class="modal-actions">
           <a id="bukti-download" class="btn btn-ghost" download>⬇ Unduh</a>
@@ -288,36 +289,36 @@
     </div>
 
     <!-- ======================= MODAL GANTI PASSWORD ======================= -->
-    <div id="password-modal" class="modal hidden">
+    <div id="password-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="password-modal-title">
       <div class="modal-box">
-        <h3>Ganti Password</h3>
+        <h3 id="password-modal-title">Ganti Password</h3>
         <form id="password-form">
           <label>Password Lama<input name="current_password" type="password" autocomplete="current-password" required /></label>
           <label>Password Baru<input name="new_password" type="password" autocomplete="new-password" required placeholder="minimal 6 karakter" /></label>
           <label>Ulangi Password Baru<input name="confirm_password" type="password" autocomplete="new-password" required /></label>
-          <p class="form-error" id="password-error"></p>
+          <p class="form-error" role="alert" id="password-error"></p>
           <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary">Simpan</button></div>
         </form>
       </div>
     </div>
 
     <!-- ======================= MODAL PENGGUNA ======================= -->
-    <div id="users-modal" class="modal hidden">
+    <div id="users-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="users-modal-title">
       <div class="modal-box">
-        <h3>Kelola Pengguna</h3>
+        <h3 id="users-modal-title">Kelola Pengguna</h3>
         <ul id="users-list" class="users-list"></ul>
         <form id="add-user-form">
           <h4>Tambah pengguna baru</h4>
           <label>Nama<input name="name" required /></label>
           <label>Username<input name="username" required /></label>
           <label>Password<input name="password" type="password" required placeholder="minimal 6 karakter" /></label>
-          <p class="form-error" id="add-user-error"></p>
+          <p class="form-error" role="alert" id="add-user-error"></p>
           <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Tutup</button><button type="submit" class="btn btn-primary">Tambah</button></div>
         </form>
       </div>
     </div>
 
-    <div id="toast" class="toast hidden"></div>
+    <div id="toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
     <script src="/app.js"></script>
   </body>
 </html>
