@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sistem Pencatatan Keuangan — PT Sintesa Data Semesta</title>
     <meta name="description" content="Sistem pencatatan pemasukan & pengeluaran PT Sintesa Data Semesta." />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%230f2c4d'/><text x='50' y='68' font-size='52' font-family='Georgia,serif' font-weight='bold' fill='%23c8a04e' text-anchor='middle'>S</text></svg>" />
+    <link rel="icon" href="/logo.svg" />
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
@@ -13,7 +13,7 @@
     <section id="auth-view" class="auth-view hidden">
       <div class="auth-card">
         <div class="auth-brand">
-          <span class="brand-mark">SDS</span>
+          <img class="brand-logo lg" src="/logo.svg" alt="Logo PT Sintesa Data Semesta" width="64" height="64" />
           <h1>PT Sintesa Data Semesta</h1>
           <p>Sistem Pencatatan Keuangan</p>
         </div>
@@ -32,7 +32,7 @@
     <div id="app-view" class="hidden">
       <header class="topbar">
         <div class="topbar-left">
-          <span class="brand-mark sm">SDS</span>
+          <img class="brand-logo" src="/logo.svg" alt="Logo PT Sintesa Data Semesta" width="40" height="40" />
           <div class="brand-text">
             <strong>PT Sintesa Data Semesta</strong>
             <span>Sistem Pencatatan Keuangan</span>
@@ -363,6 +363,6 @@
     </div>
 
     <div id="toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
-    <script src="/app.js"></script>
+    <script type="module" src="/app.js"></script>
   </body>
 </html>

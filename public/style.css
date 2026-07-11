@@ -89,6 +89,10 @@ h1, h2, h3 { font-family: var(--serif); }
 }
 .brand-mark.sm { width: 42px; height: 42px; font-size: 15px; border-radius: 9px; }
 
+/* Logo perusahaan (SVG) */
+.brand-logo { width: 40px; height: 40px; display: block; flex-shrink: 0; }
+.brand-logo.lg { width: 64px; height: 64px; margin: 0 auto 8px; }
+
 /* ---------- Tombol ---------- */
 .btn { font: inherit; font-weight: 600; cursor: pointer; border: 1px solid transparent; border-radius: 8px;
   padding: 9px 15px; transition: filter .15s, box-shadow .15s, border-color .15s; white-space: nowrap; }
@@ -400,8 +404,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   .pr-head { display: flex; justify-content: space-between; align-items: flex-start;
     border-bottom: 2.5px solid #0a1526; padding-bottom: 8px; }
   .pr-brand { display: flex; align-items: center; gap: 10px; }
-  .pr-mark { width: 44px; height: 44px; flex-shrink: 0; border: 1.5px solid #0a1526; border-radius: 7px;
-    display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; letter-spacing: 1px; color: #0a1526; }
+  .pr-mark { width: 44px; height: 44px; flex-shrink: 0; }
   .pr-co-name { font-size: 18px; font-weight: 700; letter-spacing: .5px; color: #0a1526; }
   .pr-co-sub { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: #444; }
   .pr-docmeta { font-size: 9.5px; text-align: right; color: #444; line-height: 1.6; }

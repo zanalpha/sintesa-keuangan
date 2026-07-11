@@ -2,26 +2,15 @@
 
 /* ============================================================
    Sistem Pencatatan Keuangan — PT Sintesa Data Semesta
-   Frontend tanpa framework/build.
+   Frontend tanpa bundler — ES modules native (script type="module").
+   Modul murni: js/format.js (formatter), js/csv.js (impor), js/ledger.js (saldo berjalan).
    ============================================================ */
+import { rupiah, BULAN_S, tanggalIndo, labelBulan, todayISO, pad2, escapeHtml, slug, csvCell, downloadBlob } from './js/format.js';
+import { parseCsv, rowsToTransactions } from './js/csv.js';
+import { computeLedger } from './js/ledger.js';
 
-// ---------- Util ----------
+// ---------- Util (DOM) ----------
 const $ = (id) => document.getElementById(id);
-const rupiah = (n) => 'Rp' + new Intl.NumberFormat('id-ID').format(Math.round(n || 0));
-const BULAN = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
-const BULAN_S = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
-
-function tanggalIndo(iso) {
-  const [y, m, d] = iso.split('-');
-  return `${d} ${BULAN_S[Number(m) - 1]} ${y}`;
-}
-function labelBulan(ym) { const [y, m] = ym.split('-'); return `${BULAN[Number(m) - 1]} ${y}`; }
-function todayISO() {
-  const d = new Date();
-  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 10);
-}
-function pad2(n) { return String(n).padStart(2, '0'); }
 function formatMoneyInput(e) {
   const el = e.target;
   // Hitung berapa digit ada SEBELUM kursor, agar posisi kursor bisa dipulihkan setelah
@@ -39,11 +28,6 @@ function formatMoneyInput(e) {
   }
   try { el.setSelectionRange(pos, pos); } catch (_) { /* abaikan bila tak didukung */ }
 }
-function escapeHtml(s) {
-  return String(s || '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 let toastTimer;
 function toast(msg, isErr) {
   const t = $('toast');
@@ -735,75 +719,6 @@ function openImport() {
   $('import-modal').classList.remove('hidden');
   setTimeout(() => $('import-file').focus(), 50);
 }
-function parseCsv(text) {
-  text = text.replace(/^﻿/, '');
-  const rows = [];
-  let row = [], cur = '', inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQ) {
-      if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
-      else cur += c;
-    } else if (c === '"') inQ = true;
-    else if (c === ',') { row.push(cur); cur = ''; }
-    else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
-    else if (c === '\r') { /* skip */ }
-    else cur += c;
-  }
-  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
-  return rows.filter((r) => r.some((c) => String(c).trim() !== ''));
-}
-function monthNum(name) {
-  const map = { jan: 1, feb: 2, mar: 3, apr: 4, mei: 5, may: 5, jun: 6, jul: 7, agu: 8, aug: 8, agt: 8, sep: 9, okt: 10, oct: 10, nov: 11, des: 12, dec: 12 };
-  return map[name.slice(0, 3).toLowerCase()] || 0;
-}
-function normDate(s) {
-  s = String(s).trim();
-  let m;
-  // ISO dengan pemisah "-" atau "/", boleh tanpa nol di depan: 2026-07-11, 2026/7/1.
-  if ((m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/))) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
-  if ((m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/))) return `${m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
-  if ((m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2})$/))) return `20${m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
-  if ((m = s.match(/^(\d{1,2})[\-\s]([A-Za-z]{3,})[\-\s](\d{2,4})$/))) {
-    const mo = monthNum(m[2]); if (!mo) return '';
-    const yr = m[3].length === 2 ? '20' + m[3] : m[3];
-    return `${yr}-${pad2(mo)}-${pad2(m[1])}`;
-  }
-  return '';
-}
-function rowsToTransactions(rows) {
-  if (!rows.length) return [];
-  const header = rows[0].map((h) => String(h).trim().toLowerCase());
-  const hasHeader = header.some((h) => ['jenis', 'tanggal', 'jumlah', 'keterangan', 'kategori', 'type', 'date', 'amount'].includes(h));
-  let idx = { jenis: 0, tanggal: 1, jumlah: 2, keterangan: 3, kategori: 4 };
-  let data = rows;
-  if (hasHeader) {
-    const find = (...names) => header.findIndex((h) => names.includes(h));
-    idx = {
-      jenis: find('jenis', 'type'),
-      tanggal: find('tanggal', 'date'),
-      jumlah: find('jumlah', 'amount', 'nominal'),
-      keterangan: find('keterangan', 'deskripsi', 'uraian', 'description'),
-      kategori: find('kategori', 'category'),
-    };
-    data = rows.slice(1);
-  }
-  const out = [];
-  for (const r of data) {
-    const get = (k) => (idx[k] >= 0 && idx[k] < r.length ? String(r[idx[k]]).trim() : '');
-    const jenis = get('jenis').toLowerCase();
-    let type = null;
-    if (/masuk|pemasukan|\bin\b/.test(jenis)) type = 'masuk';
-    else if (/keluar|pengeluaran|biaya|\bout\b/.test(jenis)) type = 'keluar';
-    const tanggal = normDate(get('tanggal'));
-    // Buang dulu gugus sen di akhir (mis. ",00" / ".00") SEBELUM menghapus pemisah ribuan,
-    // agar "1.500.000,00" -> 1500000 (bukan 150000000 alias 100x lipat). "1.500.000" tetap utuh.
-    const jumlah = get('jumlah').trim().replace(/[.,]\d{1,2}$/, '').replace(/[^\d]/g, '');
-    if (!type || !tanggal || !jumlah) continue;
-    out.push({ type, tanggal, jumlah, keterangan: get('keterangan'), kategori: get('kategori') });
-  }
-  return out;
-}
 $('import-file').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -827,18 +742,6 @@ function downloadTemplate() {
 // ============================================================
 //  EKSPOR & CETAK
 // ============================================================
-function downloadBlob(content, filename, mime) {
-  const blob = new Blob([content], { type: (mime || 'text/csv') + ';charset=utf-8;' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
-function csvCell(v) {
-  const s = String(v == null ? '' : v);
-  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
 function exportCsv() {
   const book = curBook();
   const name = slug(book ? book.name : 'buku');
@@ -855,26 +758,6 @@ function exportCsv() {
   const lines = [['Jenis', 'Tanggal', 'Jumlah', 'Keterangan', 'Kategori'].join(',')];
   for (const t of rows) lines.push([t.type === 'masuk' ? 'Pemasukan' : 'Pengeluaran', t.tanggal, t.jumlah, t.keterangan, t.kategori].map(csvCell).join(','));
   downloadBlob('﻿' + lines.join('\r\n'), `kas-${name}-${state.month || 'semua'}.csv`);
-}
-function slug(s) { return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
-
-// Hitung ledger kronologis (saldo berjalan) untuk kumpulan transaksi & periode apa pun.
-// Transaksi sebelum `from` dilipat ke dalam saldo pembuka agar saldo berjalan tetap kontinu.
-function computeLedger(scopeTx, saldoAwal, from, to) {
-  const sorted = [...scopeTx].sort((a, b) =>
-    a.tanggal < b.tanggal ? -1 : a.tanggal > b.tanggal ? 1 : a.id - b.id);
-  let opening = saldoAwal;
-  for (const t of sorted) if (from && t.tanggal < from) opening += t.type === 'masuk' ? t.jumlah : -t.jumlah;
-  let running = opening, tMasuk = 0, tKeluar = 0;
-  const rows = [];
-  for (const t of sorted) {
-    if (from && t.tanggal < from) continue;
-    if (to && t.tanggal > to) continue;
-    running += t.type === 'masuk' ? t.jumlah : -t.jumlah;
-    if (t.type === 'masuk') tMasuk += t.jumlah; else tKeluar += t.jumlah;
-    rows.push({ ...t, saldo: running });
-  }
-  return { opening, rows, tMasuk, tKeluar, saldoAkhir: running };
 }
 
 // ============================================================
@@ -939,7 +822,7 @@ function buildPrintReport() {
   const html = `
     <header class="pr-head">
       <div class="pr-brand">
-        <div class="pr-mark">SDS</div>
+        <img class="pr-mark" src="/logo.svg" alt="Logo PT Sintesa Data Semesta" width="44" height="44" />
         <div>
           <div class="pr-co-name">PT SINTESA DATA SEMESTA</div>
           <div class="pr-co-sub">Sistem Pencatatan Keuangan</div>

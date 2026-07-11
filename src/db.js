@@ -14,7 +14,12 @@ function createPool() {
   const url = process.env.DATABASE_URL;
 
   if (url) {
-    const { Pool } = require('pg');
+    const pg = require('pg');
+    // Kembalikan kolom DATE (OID 1082) sebagai string 'YYYY-MM-DD' apa adanya — bukan objek
+    // Date yang bisa bergeser zona waktu. Menjaga logika tanggal frontend/backend tetap sama
+    // meski tipe kolom kini DATE.
+    pg.types.setTypeParser(1082, (v) => v);
+    const { Pool } = pg;
     const isLocal = /localhost|127\.0\.0\.1/.test(url);
     // Verifikasi sertifikat server DB dapat diaktifkan (defense-in-depth) via PGSSL_STRICT=1.
     // Default longgar agar tetap tersambung ke Postgres Render (sertifikat self-signed).
@@ -102,7 +107,7 @@ async function run(statements) {
 }
 
 // Versi skema saat ini. Naikkan bila menambah langkah migrasi baru.
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 /** Membuat tabel bila belum ada. Aman dipanggil berulang kali. */
 async function migrate() {
@@ -160,6 +165,21 @@ async function migrate() {
   await addColumn('transactions', 'bukti TEXT', 'bukti'); // data URL gambar/pdf, boleh kosong
   await addColumn('transactions', 'deleted_at TIMESTAMPTZ', 'deleted_at'); // soft-delete
   await addColumn('users', "role TEXT NOT NULL DEFAULT 'admin'", 'role'); // 'admin' | 'viewer'
+
+  // Integritas tingkat DB: ubah tanggal TEXT -> DATE (Postgres akan menolak tanggal mustahil).
+  // Nilai lama 'YYYY-MM-DD' di-cast mulus; type parser 1082 menjaga hasilnya tetap string.
+  // Di pg-mem / information_schema tak lengkap, langkah ini dilewati (TEXT berperilaku setara).
+  try {
+    const { rows } = await query(
+      "SELECT data_type FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'tanggal'"
+    );
+    if (rows[0] && rows[0].data_type === 'text') {
+      await query('ALTER TABLE transactions ALTER COLUMN tanggal TYPE DATE USING tanggal::date');
+      console.log('[db] Kolom transactions.tanggal dimigrasi TEXT -> DATE.');
+    }
+  } catch (e) {
+    console.warn('[db] Migrasi tanggal ke DATE dilewati:', e.message);
+  }
 
   // Catat versi skema (best-effort; abaikan bila balapan antar-instance).
   try {
