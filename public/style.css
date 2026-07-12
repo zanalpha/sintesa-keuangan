@@ -478,6 +478,11 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   table.pr-bd-table td.num { text-align: right; font-family: ui-monospace, Menlo, Consolas, monospace; white-space: nowrap; }
   table.pr-bd-table tr.total td { border-top: 1px solid #999; border-bottom: 0; font-weight: 700; }
 
+  /* --- Paragraf analisis pengeluaran (otomatis dari data periode) --- */
+  .pr-analisis { margin-top: 16px; page-break-inside: avoid; }
+  .pr-analisis h4 { font-size: 10px; margin: 0 0 4px; text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid #0a1526; padding-bottom: 2px; }
+  .pr-analisis-body { font-size: 10px; line-height: 1.55; text-align: justify; margin: 0; color: #1a1a1a; }
+
   /* --- Blok tanda tangan --- */
   .pr-sign { margin-top: 28px; page-break-inside: avoid; }
   .pr-place { text-align: right; font-size: 10px; margin-bottom: 8px; }

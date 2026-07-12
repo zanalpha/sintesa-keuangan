@@ -805,6 +805,36 @@ function buildPrintReport() {
       `<tr class="total"><td>TOTAL</td><td class="num">${rupiah(bd.tot)}</td><td class="num">100%</td></tr>`
     : `<tr><td colspan="3" style="color:#666;font-style:italic">Tidak ada</td></tr>`;
 
+  // Analisis pengeluaran otomatis — 1 paragraf, dihitung dari data periode.
+  const analisisPengeluaran = () => {
+    const tK = L.tKeluar, tM = L.tMasuk;
+    const nK = L.rows.filter((r) => r.type === 'keluar').length;
+    if (tK === 0) return 'Tidak ada pengeluaran yang tercatat pada periode ini, sehingga seluruh pemasukan menjadi saldo bersih tanpa beban belanja.';
+    const net = tM - tK;
+    const ratio = tM > 0 ? Math.round((tK / tM) * 100) : null;
+    const top = bdOut.arr[0];
+    const topPct = bdOut.tot ? Math.round((top.v / bdOut.tot) * 100) : 0;
+    const kat2 = bdOut.arr[1];
+    const kat2Pct = kat2 && bdOut.tot ? Math.round((kat2.v / bdOut.tot) * 100) : 0;
+    let big = null;
+    for (const r of L.rows) if (r.type === 'keluar' && (!big || r.jumlah > big.jumlah)) big = r;
+
+    let nilai;
+    if (ratio === null) nilai = 'Tidak ada pemasukan pada periode ini sebagai pembanding, sehingga seluruh pengeluaran langsung menggerus saldo — arus kas perlu diwaspadai.';
+    else if (net < 0) nilai = `Pengeluaran melampaui pemasukan (rasio ${ratio}%) dan menimbulkan defisit ${rupiah(Math.abs(net))}; disarankan mengevaluasi pos belanja terbesar atau menambah pemasukan.`;
+    else if (ratio >= 80) nilai = `Rasio belanja tergolong tinggi (${ratio}% dari pemasukan) sehingga margin kas menipis; menekan pos pengeluaran terbesar dapat memperkuat surplus.`;
+    else if (ratio >= 50) nilai = `Rasio belanja tergolong wajar (${ratio}% dari pemasukan) dengan surplus ${rupiah(net)}, meski ruang surplus tetap perlu dijaga.`;
+    else nilai = `Rasio belanja tergolong sehat (${ratio}% dari pemasukan) dan menyisakan surplus ${rupiah(net)} sebagai penguat kas.`;
+
+    const lead = periodLabel === 'Seluruh periode' ? 'Secara keseluruhan' : `Selama ${periodLabel}`;
+    let s = `${lead}, tercatat ${nK} transaksi pengeluaran dengan total ${rupiah(tK)}`;
+    s += ratio !== null ? ` — setara ${ratio}% dari pemasukan ${rupiah(tM)}.` : '.';
+    s += ` Pos belanja terbesar berasal dari kategori ${escapeHtml(top.k)} sebesar ${rupiah(top.v)} (${topPct}% dari total pengeluaran)`;
+    s += kat2 ? `, diikuti ${escapeHtml(kat2.k)} (${kat2Pct}%).` : '.';
+    if (big) s += ` Pengeluaran tunggal terbesar ${rupiah(big.jumlah)}${big.keterangan ? ` untuk "${escapeHtml(big.keterangan)}"` : ''}.`;
+    return s + ' ' + nilai;
+  };
+
   // Baris ledger.
   const openLabel = from ? `Saldo awal per ${tanggalIndo(from)}` : 'SALDO AWAL';
   let ledgerBody = `<tr class="opening"><td class="c-no"></td><td>—</td><td colspan="2">${openLabel}</td><td class="num"></td><td class="num"></td><td class="num">${rupiah(L.opening)}</td></tr>`;
@@ -876,6 +906,11 @@ function buildPrintReport() {
         <h4>Rekap Pengeluaran per Kategori</h4>
         <table class="pr-bd-table"><tbody>${bdRows(bdOut)}</tbody></table>
       </div>
+    </section>
+
+    <section class="pr-analisis">
+      <h4>Analisis Pengeluaran</h4>
+      <p class="pr-analisis-body">${analisisPengeluaran()}</p>
     </section>
 
     <section class="pr-sign">
