@@ -16,8 +16,10 @@ module.exports = [
     },
   },
   {
+    // File di public/ dimuat sebagai ES module (<script type="module">) — memakai import/export.
+    // Harus di-parse sebagai 'module', bukan 'script', agar ESLint tak melempar parse error.
     files: ['public/**/*.js'],
-    languageOptions: { ecmaVersion: 2022, sourceType: 'script' },
+    languageOptions: { ecmaVersion: 2022, sourceType: 'module' },
     rules: {
       'no-unused-vars': 'warn',
       'no-undef': 'off',
