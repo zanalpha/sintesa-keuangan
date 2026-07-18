@@ -29,6 +29,11 @@ function createPool() {
       // Render (dan hosting Postgres lain) memerlukan SSL untuk koneksi eksternal.
       ssl: isLocal ? false : { rejectUnauthorized: strictSsl },
       max: 10,
+      // Batas waktu agar permintaan GAGAL CEPAT alih-alih menggantung tanpa akhir
+      // saat DB baru bangun / ada gangguan jaringan (tanpa ini, connect() menunggu selamanya).
+      connectionTimeoutMillis: 10000, // maksimal 10 dtk menunggu koneksi dari pool
+      idleTimeoutMillis: 30000, // daur ulang koneksi menganggur >30 dtk (sebelum Render memutusnya)
+      keepAlive: true, // TCP keep-alive: kurangi pemutusan koneksi idle di jaringan cloud
     });
     // PENTING: tanpa listener ini, error pada koneksi idle (mis. Postgres Render
     // memutus koneksi menganggur) akan dilempar sebagai 'uncaught' dan MEMATIKAN proses.
@@ -234,11 +239,17 @@ async function seedAdmin() {
   }
   const bcrypt = require('bcryptjs');
   const hash = await bcrypt.hash(password, 12);
-  await query(
-    "INSERT INTO users (username, name, password_hash, role) VALUES ($1, $2, $3, 'admin')",
-    [username, name, hash]
-  );
-  console.log(`[db] Admin pertama '${username}' dibuat dari environment.`);
+  try {
+    await query(
+      "INSERT INTO users (username, name, password_hash, role) VALUES ($1, $2, $3, 'admin')",
+      [username, name, hash]
+    );
+    console.log(`[db] Admin pertama '${username}' dibuat dari environment.`);
+  } catch (e) {
+    // Bila dua instance melakukan seed bersamaan, UNIQUE(username) menolak yang kedua.
+    // Itu bukan kegagalan fatal — admin sudah ada — jadi cukup dicatat, jangan matikan startup.
+    console.warn('[db] Seed admin dilewati (kemungkinan sudah dibuat instance lain):', e.message);
+  }
 }
 
 /** Cek konektivitas DB untuk health check. */

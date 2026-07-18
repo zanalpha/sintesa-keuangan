@@ -1,0 +1,40 @@
+name: Keep-alive (cegah cold start)
+
+# Ping /healthz secara berkala agar web service Render (plan free) tidak "tidur".
+# Free tier menidurkan service setelah ~15 menit idle; interval <15 menit membuatnya
+# tetap hangat sehingga pengunjung tidak menunggu cold start (~13-30 dtk).
+#
+# Catatan: penjadwalan cron GitHub Actions bisa tertunda beberapa menit saat sibuk,
+# jadi cold start sesekali masih mungkin — tetapi frekuensinya turun drastis.
+# GitHub juga menonaktifkan schedule bila repo tak ada aktivitas selama 60 hari.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *' # tiap 10 menit
+  workflow_dispatch: {} # tombol jalankan manual
+
+# Bila satu run masih berjalan, batalkan yang lama agar tak menumpuk.
+concurrency:
+  group: keepalive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /healthz (bangunkan bila tidur)
+        env:
+          URL: https://sintesa-keuangan.onrender.com/healthz
+        run: |
+          # --max-time 60: beri waktu cold start bangun.
+          # --retry 4 --retry-delay 15 --retry-all-errors: ulangi bila 5xx/timeout saat bangun.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            --max-time 60 --retry 4 --retry-delay 15 --retry-all-errors \
+            "$URL") || true
+          echo "HTTP $code dari $URL"
+          # 200 = DB sehat. Selain itu dianggap gagal (sekaligus alert uptime dasar via email Actions).
+          if [ "$code" != "200" ]; then
+            echo "::error::Health check gagal (HTTP $code)."
+            exit 1
+          fi
+          echo "Service hangat & sehat."

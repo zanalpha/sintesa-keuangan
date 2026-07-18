@@ -359,7 +359,11 @@
 
     <!-- Overlay saat memuat / bangun dari cold-start -->
     <div id="boot-loading" class="boot-loading">
-      <div class="boot-card"><span class="spinner" aria-hidden="true"></span><span>Memuat…</span></div>
+      <div class="boot-card">
+        <span class="spinner" id="boot-spinner" aria-hidden="true"></span>
+        <span id="boot-msg">Memuat…</span>
+        <button type="button" id="boot-retry" class="btn hidden">Coba lagi</button>
+      </div>
     </div>
 
     <div id="toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>

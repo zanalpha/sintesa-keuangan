@@ -38,13 +38,28 @@ function toast(msg, isErr) {
 }
 
 // ---------- API ----------
-async function api(method, url, body) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function api(method, url, body, timeoutMs = 60000) {
   const opts = { method, headers: {}, credentials: 'same-origin' };
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(url, opts);
+  // Batasi waktu tunggu agar permintaan tidak menggantung selamanya (mis. server cold-start
+  // di Render). AbortController didukung semua browser modern.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  opts.signal = ctrl.signal;
+  let res;
+  try {
+    res = await fetch(url, opts);
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw new Error('Server tidak merespons (mungkin sedang bangun). Coba lagi.');
+    throw new Error('Tidak dapat terhubung ke server. Periksa koneksi internet.');
+  } finally {
+    clearTimeout(timer);
+  }
   let data = {};
   try { data = await res.json(); } catch (_) {}
   if (!res.ok) throw new Error(data.error || 'Terjadi kesalahan (' + res.status + ')');
@@ -98,12 +113,37 @@ async function boot() {
   initTheme();
   startClock();
   wireStaticHandlers();
-  try {
-    const status = await api('GET', '/api/auth/status');
-    if (status.authenticated) { state.user = status.user; await enterApp(); }
-    else showAuth();
-  } catch (e) { showAuth(); }
-  $('boot-loading').classList.add('hidden');
+  const retryBtn = $('boot-retry');
+  if (retryBtn) retryBtn.addEventListener('click', bootStatus);
+  await bootStatus();
+}
+
+// Ambil status auth dengan tahan cold-start: coba beberapa kali sambil memberi tahu
+// pengguna bahwa server sedang bangun, dan tawarkan "coba lagi" bila akhirnya gagal —
+// alih-alih diam-diam melempar ke layar login (yang menyesatkan saat server yang bermasalah).
+async function bootStatus() {
+  const msgEl = $('boot-msg');
+  const spinner = $('boot-spinner');
+  const retryBtn = $('boot-retry');
+  if (retryBtn) retryBtn.classList.add('hidden');
+  if (spinner) spinner.classList.remove('hidden');
+  const attempts = 4;
+  for (let i = 1; i <= attempts; i++) {
+    if (msgEl) msgEl.textContent = i === 1 ? 'Memuat…' : 'Server sedang bangun, mohon tunggu…';
+    try {
+      const status = await api('GET', '/api/auth/status');
+      if (status.authenticated) { state.user = status.user; await enterApp(); }
+      else showAuth();
+      $('boot-loading').classList.add('hidden');
+      return;
+    } catch (e) {
+      if (i < attempts) { await sleep(3000); continue; }
+      // Semua percobaan gagal → jangan sembunyikan masalah; tampilkan pesan + tombol coba lagi.
+      if (spinner) spinner.classList.add('hidden');
+      if (msgEl) msgEl.textContent = 'Gagal terhubung ke server. Periksa koneksi Anda lalu coba lagi.';
+      if (retryBtn) retryBtn.classList.remove('hidden');
+    }
+  }
 }
 function showAuth() { $('app-view').classList.add('hidden'); $('auth-view').classList.remove('hidden'); }
 
@@ -477,6 +517,11 @@ $('tx-form').jumlah.addEventListener('input', formatMoneyInput);
 $('tx-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
+  const submitBtn = $('tx-submit');
+  // Cegah submit ganda: bila permintaan sebelumnya masih berjalan, abaikan klik berikutnya.
+  // Tanpa ini, request lambat (cold start / upload bukti) membuat pengguna mengira aplikasi
+  // "hang" lalu mengklik berulang — menghasilkan transaksi kembar.
+  if (submitBtn.disabled) return;
   $('tx-error').textContent = '';
   const payload = {
     type: f.type.value, tanggal: f.tanggal.value,
@@ -486,8 +531,14 @@ $('tx-form').addEventListener('submit', async (e) => {
   if (!payload.jumlah) { $('tx-error').textContent = 'Jumlah wajib diisi.'; return; }
   // Sertakan "bukti" hanya bila diubah (data URL baru, atau null bila dihapus).
   if (buktiState.changed) payload.bukti = buktiState.data;
+
+  const isNew = !f.id.value;
+  const origText = submitBtn.textContent;
+  // Umpan balik visual + kunci tombol selama proses simpan (klik → langsung terlihat responsif).
+  submitBtn.disabled = true;
+  submitBtn.setAttribute('aria-busy', 'true');
+  submitBtn.textContent = 'Menyimpan…';
   try {
-    const isNew = !f.id.value;
     if (isNew) { await api('POST', `/api/books/${state.bookId}/transactions`, payload); toast('Transaksi ditambahkan.'); }
     else { await api('PATCH', `/api/transactions/${f.id.value}`, payload); toast('Transaksi diperbarui.'); }
     const again = isNew && $('tx-again').checked;
@@ -503,6 +554,13 @@ $('tx-form').addEventListener('submit', async (e) => {
       closeModals();
     }
   } catch (err) { $('tx-error').textContent = err.message; }
+  finally {
+    submitBtn.disabled = false;
+    submitBtn.setAttribute('aria-busy', 'false');
+    // Untuk kasus "again", openTxModal() sudah menyetel ulang teks tombol; hanya pulihkan
+    // bila masih menampilkan status "Menyimpan…".
+    if (submitBtn.textContent === 'Menyimpan…') submitBtn.textContent = origText;
+  }
 });
 
 // ============================================================
