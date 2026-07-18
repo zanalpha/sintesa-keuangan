@@ -168,12 +168,16 @@ async function migrate() {
   await addColumn('books', "saldo_awal BIGINT NOT NULL DEFAULT 0", 'saldo_awal');
   await addColumn('books', "bank_info TEXT NOT NULL DEFAULT ''", 'bank_info');
   await addColumn('transactions', 'bukti TEXT', 'bukti'); // data URL gambar/pdf, boleh kosong
-  await addColumn('transactions', 'deleted_at TIMESTAMPTZ', 'deleted_at'); // soft-delete
+  await addColumn('transactions', 'deleted_at TIMESTAMPTZ', 'deleted_at'); // soft-delete transaksi
+  await addColumn('books', 'deleted_at TIMESTAMPTZ', 'deleted_at'); // soft-delete rekening (bisa dipulihkan)
   await addColumn('users', "role TEXT NOT NULL DEFAULT 'admin'", 'role'); // 'admin' | 'viewer'
+  // Epoch sesi: dinaikkan saat ganti password untuk mencabut sesi lama (di perangkat lain).
+  await addColumn('users', 'session_epoch INTEGER NOT NULL DEFAULT 0', 'session_epoch');
 
   // Integritas tingkat DB: ubah tanggal TEXT -> DATE (Postgres akan menolak tanggal mustahil).
   // Nilai lama 'YYYY-MM-DD' di-cast mulus; type parser 1082 menjaga hasilnya tetap string.
   // Di pg-mem / information_schema tak lengkap, langkah ini dilewati (TEXT berperilaku setara).
+  let dateColOk = true; // apakah kolom tanggal sudah/berhasil menjadi DATE (integritas aktif)?
   try {
     const { rows } = await query(
       "SELECT data_type FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'tanggal'"
@@ -183,14 +187,20 @@ async function migrate() {
       console.log('[db] Kolom transactions.tanggal dimigrasi TEXT -> DATE.');
     }
   } catch (e) {
-    console.warn('[db] Migrasi tanggal ke DATE dilewati:', e.message);
+    // Mis. ada baris 'YYYY-MM-DD' yang mustahil (peninggalan v1/restore) menolak cast.
+    dateColOk = false;
+    console.warn('[db] Migrasi tanggal ke DATE GAGAL (kolom tetap TEXT); akan dicoba lagi saat start berikutnya:', e.message);
   }
 
-  // Catat versi skema (best-effort; abaikan bila balapan antar-instance).
-  try {
-    await query('INSERT INTO schema_migrations (version) VALUES ($1)', [SCHEMA_VERSION]);
-  } catch (_) {
-    /* versi sudah tercatat */
+  // Catat versi skema HANYA bila semua langkah (termasuk DATE) sukses — agar catatan versi tidak
+  // "berbohong" dan langkah yang gagal benar-benar dicoba ulang pada start berikutnya.
+  // (best-effort; abaikan bila balapan antar-instance).
+  if (dateColOk) {
+    try {
+      await query('INSERT INTO schema_migrations (version) VALUES ($1)', [SCHEMA_VERSION]);
+    } catch (_) {
+      /* versi sudah tercatat */
+    }
   }
 }
 
@@ -230,10 +240,12 @@ async function seedAdmin() {
   const username = String(process.env.ADMIN_USER || '').trim().toLowerCase();
   const password = String(process.env.ADMIN_PASSWORD || '');
   const name = String(process.env.ADMIN_NAME || 'Administrator').trim();
-  if (!username || password.length < 6) {
+  // Akun admin pertama = paling berkuasa. Samakan dengan kebijakan aplikasi (min 10 karakter),
+  // jangan izinkan password lemah 6-karakter yang mudah ditebak.
+  if (!username || password.length < 10) {
     console.warn(
-      '[db] Belum ada pengguna dan ADMIN_USER/ADMIN_PASSWORD belum diisi.\n' +
-        '      Set env ADMIN_USER & ADMIN_PASSWORD (min 6 karakter) lalu restart untuk membuat admin pertama.'
+      '[db] Belum ada pengguna dan ADMIN_USER/ADMIN_PASSWORD belum diisi (atau password < 10 karakter).\n' +
+        '      Set env ADMIN_USER & ADMIN_PASSWORD (min 10 karakter) lalu restart untuk membuat admin pertama.'
     );
     return;
   }

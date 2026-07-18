@@ -25,7 +25,11 @@ export function escapeHtml(s) {
 export function slug(s) { return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
 
 export function csvCell(v) {
-  const s = String(v == null ? '' : v);
+  let s = String(v == null ? '' : v);
+  // Cegah injeksi formula (CSV injection): sel yang diawali = + - @ atau tab/CR bisa
+  // dieksekusi sebagai rumus saat file dibuka di Excel/Sheets. Beri prefiks kutip tunggal
+  // agar diperlakukan sebagai teks biasa.
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 

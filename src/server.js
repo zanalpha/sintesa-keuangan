@@ -39,23 +39,30 @@ app.use((req, res, next) => {
     'Content-Security-Policy',
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
       "img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'self'; " +
-      "form-action 'self'; frame-ancestors 'none'"
+      "form-action 'self'; frame-ancestors 'none'; object-src 'none'"
   );
   if (isProd) res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  // Data keuangan (dan cadangan/bukti) tak boleh disimpan cache oleh browser maupun perantara.
+  if (req.path.startsWith('/api')) res.setHeader('Cache-Control', 'no-store');
   next();
 });
 
 app.use(express.json({ limit: '8mb' })); // besar untuk menampung bukti (gambar) yang sudah dikompres
 
 const secret = process.env.SESSION_SECRET;
-if (isProd && (!secret || secret.length < 16)) {
-  console.error('FATAL: SESSION_SECRET wajib diisi (min 16 karakter) di produksi.');
+// Deployment nyata memakai Postgres (DATABASE_URL). Gantungkan syarat secret ke sinyal ini,
+// BUKAN ke NODE_ENV yang mudah lupa diset — bila lupa, kunci sesi akan jatuh ke string
+// yang tercetak di kode sumber publik, memungkinkan pemalsuan sesi admin. Cegah keras.
+const hasDb = !!process.env.DATABASE_URL;
+if (hasDb && (!secret || secret.length < 16)) {
+  console.error('FATAL: SESSION_SECRET wajib diisi (min 16 karakter) saat DATABASE_URL diset.');
   process.exit(1);
 }
 app.use(
   cookieSession({
     name: 'sintesa_kas',
-    keys: [secret || 'dev-secret-tidak-aman-ganti-di-produksi'],
+    // Fallback hanya terjangkau di dev lokal tanpa DATABASE_URL (data pg-mem non-permanen).
+    keys: [secret || 'dev-lokal-tanpa-db-JANGAN-dipakai-di-produksi'],
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 hari
     httpOnly: true,
     sameSite: 'lax',

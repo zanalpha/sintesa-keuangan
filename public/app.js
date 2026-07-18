@@ -40,6 +40,24 @@ function toast(msg, isErr) {
 // ---------- API ----------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Kunci tombol submit sebuah form selama aksi async berjalan: cegah klik-ganda
+// (mis. transfer/rekening ganda saat server lambat) + beri umpan balik "Menyimpan…".
+async function withSubmitLock(form, busyText, fn) {
+  const btn = form.querySelector('[type="submit"]');
+  if (btn && btn.disabled) return; // aksi sebelumnya masih berjalan → abaikan klik ini
+  const orig = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); btn.textContent = busyText; }
+  try {
+    await fn();
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.setAttribute('aria-busy', 'false');
+      if (btn.textContent === busyText) btn.textContent = orig;
+    }
+  }
+}
+
 async function api(method, url, body, timeoutMs = 60000) {
   const opts = { method, headers: {}, credentials: 'same-origin' };
   if (body !== undefined) {
@@ -182,6 +200,13 @@ async function loadBooks() {
   const { books } = await api('GET', '/api/books');
   state.books = books;
   if (books.length === 0) {
+    if (!isAdmin()) {
+      // Viewer tak berhak membuat rekening — jangan POST (akan 403 & memicu pesan menyesatkan).
+      renderBookSelect();
+      render();
+      toast('Belum ada rekening. Hubungi admin untuk membuatnya.', true);
+      return;
+    }
     const { book } = await api('POST', '/api/books', { name: 'Rekening Utama' });
     state.books = [book];
   }
@@ -258,8 +283,11 @@ function render() {
   // Analitik ikut scope (gabungan / rekening tertentu); tampilan lain ikut rekening terpilih.
   const scopeTx = analitik ? anaTx() : state.transactions;
   const scopeSaldoAwal = analitik ? anaSaldoAwal() : (book ? book.saldo_awal : 0);
-  const totalMasuk = scopeTx.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
-  const totalKeluar = scopeTx.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
+  // Kartu ringkasan pada view Catatan mengikuti filter aktif (bulan/kategori/cari) agar
+  // konsisten dengan daftar & footer yang ditampilkan; view lain memakai seluruh scope.
+  const cardTx = state.view === 'catatan' ? visibleTx() : scopeTx;
+  const totalMasuk = cardTx.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
+  const totalKeluar = cardTx.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
 
   $('sum-masuk').textContent = rupiah(totalMasuk);
   $('sum-keluar').textContent = rupiah(totalKeluar);
@@ -347,9 +375,12 @@ function computeBesar() {
 function renderBukuBesar() {
   const d = computeBesar();
   const tbody = $('tbody-besar');
+  const invalidRange = d.from && d.to && d.from > d.to;
   const openLabel = d.from ? `Saldo Awal per ${tanggalIndo(d.from)}` : 'SALDO AWAL';
   let html = `<tr class="opening"><td></td><td></td><td>${openLabel}</td><td class="c-amt"></td><td class="c-amt"></td><td class="c-amt r-saldo">${rupiah(d.opening)}</td></tr>`;
-  if (d.rows.length === 0) {
+  if (invalidRange) {
+    html += `<tr class="empty-row"><td colspan="6">Rentang tanggal tidak valid: "Dari" (${tanggalIndo(d.from)}) melewati "Sampai" (${tanggalIndo(d.to)}).</td></tr>`;
+  } else if (d.rows.length === 0) {
     html += `<tr class="empty-row"><td colspan="6">Belum ada transaksi pada rentang ini</td></tr>`;
   } else {
     d.rows.forEach((r, i) => {
@@ -442,7 +473,9 @@ function updateBuktiStatus() {
     $('bukti-status').classList.add('hidden');
   }
 }
+let buktiLastFocused = null;
 function showBukti(dataUrl) {
+  buktiLastFocused = document.activeElement; // agar fokus kembali saat penampil bukti ditutup
   const area = $('bukti-view-area'), dl = $('bukti-download');
   dl.href = dataUrl;
   if (dataUrl.startsWith('data:application/pdf')) {
@@ -467,7 +500,13 @@ async function openBukti(id) {
     showBukti(bukti);
   } catch (err) { toast(err.message, true); }
 }
-function closeBukti() { $('bukti-modal').classList.add('hidden'); }
+function closeBukti() {
+  $('bukti-modal').classList.add('hidden');
+  if (buktiLastFocused && buktiLastFocused.focus) {
+    try { buktiLastFocused.focus(); } catch (_) { /* elemen mungkin sudah hilang */ }
+  }
+  buktiLastFocused = null;
+}
 
 // ============================================================
 //  MODAL TRANSAKSI
@@ -591,12 +630,14 @@ $('book-form').addEventListener('submit', async (e) => {
   const f = e.target;
   $('book-error').textContent = '';
   const payload = { name: f.name.value, saldo_awal: f.saldo_awal.value.replace(/\D/g, ''), bank_info: f.bank_info.value };
-  try {
-    if (f.id.value) { await api('PATCH', `/api/books/${f.id.value}`, payload); toast('Rekening diperbarui.'); }
-    else { const { book } = await api('POST', '/api/books', payload); state.bookId = book.id; toast('Rekening dibuat.'); }
-    closeModals();
-    await loadBooks();
-  } catch (err) { $('book-error').textContent = err.message; }
+  withSubmitLock(f, 'Menyimpan…', async () => {
+    try {
+      if (f.id.value) { await api('PATCH', `/api/books/${f.id.value}`, payload); toast('Rekening diperbarui.'); }
+      else { const { book } = await api('POST', '/api/books', payload); state.bookId = book.id; toast('Rekening dibuat.'); }
+      closeModals();
+      await loadBooks();
+    } catch (err) { $('book-error').textContent = err.message; }
+  });
 });
 
 async function deleteBook() {
@@ -604,7 +645,7 @@ async function deleteBook() {
   if (!id) return;
   if (state.books.length <= 1) return toast('Minimal harus ada satu rekening.', true);
   const b = state.books.find((x) => x.id === id);
-  if (!confirm(`Hapus rekening "${b ? b.name : ''}" beserta SEMUA transaksinya? Tindakan ini tidak bisa dibatalkan.`)) return;
+  if (!confirm(`Hapus rekening "${b ? b.name : ''}" beserta transaksinya? Data diarsipkan (tetap tersimpan untuk pemulihan) dan tak lagi muncul di aplikasi.`)) return;
   try {
     await api('DELETE', `/api/books/${id}`);
     if (state.bookId === id) { localStorage.removeItem('sintesa_book'); state.bookId = null; }
@@ -650,11 +691,13 @@ $('add-user-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
   $('add-user-error').textContent = '';
-  try {
-    await api('POST', '/api/auth/register', { name: f.name.value, username: f.username.value, password: f.password.value, role: f.role.value });
-    toast('Pengguna ditambahkan.');
-    await openUsers();
-  } catch (err) { $('add-user-error').textContent = err.message; }
+  withSubmitLock(f, 'Menyimpan…', async () => {
+    try {
+      await api('POST', '/api/auth/register', { name: f.name.value, username: f.username.value, password: f.password.value, role: f.role.value });
+      toast('Pengguna ditambahkan.');
+      await openUsers();
+    } catch (err) { $('add-user-error').textContent = err.message; }
+  });
 });
 
 // ---------- Ganti password ----------
@@ -707,7 +750,11 @@ $('restore-file').addEventListener('change', async (e) => {
     state.bookId = null;
     localStorage.removeItem('sintesa_book');
     await loadBooks();
-    toast(`Dipulihkan: ${res.books} rekening, ${res.transactions} transaksi.`);
+    // Jangan sembunyikan data yang dilewati saat restore — beri tahu pengguna.
+    const warn = (res.skipped || res.buktiDropped)
+      ? ` (${res.skipped || 0} transaksi dilewati, ${res.buktiDropped || 0} bukti dibuang)`
+      : '';
+    toast(`Dipulihkan: ${res.books} rekening, ${res.transactions} transaksi${warn}.`, !!warn);
   } catch (err) { toast('Gagal memulihkan: ' + err.message, true); }
 });
 
@@ -741,12 +788,14 @@ $('transfer-form').addEventListener('submit', async (e) => {
     tanggal: f.tanggal.value, jumlah: f.jumlah.value.replace(/\D/g, ''), keterangan: f.keterangan.value,
   };
   if (!payload.jumlah) { $('transfer-error').textContent = 'Jumlah wajib diisi.'; return; }
-  try {
-    await api('POST', '/api/transfer', payload);
-    toast('Transfer berhasil dicatat.');
-    closeModals();
-    await loadData();
-  } catch (err) { $('transfer-error').textContent = err.message; }
+  withSubmitLock(f, 'Menyimpan…', async () => {
+    try {
+      await api('POST', '/api/transfer', payload);
+      toast('Transfer berhasil dicatat.');
+      closeModals();
+      loadData().catch(() => toast('Tersimpan. Gagal memuat ulang daftar — silakan segarkan halaman.', true));
+    } catch (err) { $('transfer-error').textContent = err.message; }
+  });
 });
 
 // ---------- Riwayat aktivitas (audit) ----------
@@ -845,6 +894,17 @@ function buildPrintReport() {
     periodLabel = labelBulan(state.month);
   }
 
+  // Laporan cetak adalah ledger periode penuh (kolom saldo berjalan harus utuh), sehingga
+  // filter layar kategori/pencarian TIDAK diterapkan. Bila aktif, beri catatan agar dokumen
+  // tak disalahartikan sebagai laporan terfilter.
+  let filterNote = '';
+  if (state.view === 'catatan') {
+    const fl = [];
+    if (state.kategori) fl.push(`kategori "${state.kategori}"`);
+    if (state.search) fl.push(`pencarian "${state.search}"`);
+    if (fl.length) filterNote = `Filter layar (${fl.join(', ')}) tidak diterapkan; laporan mencakup seluruh transaksi periode.`;
+  }
+
   const jenis = analitik ? 'Rekapitulasi Keuangan' : state.view === 'besar' ? 'Buku Besar' : 'Buku Kas';
   const L = computeLedger(scopeTx, saldoAwal, from, to);
   const cetakTgl = tanggalIndo(todayISO());
@@ -935,6 +995,7 @@ function buildPrintReport() {
       ${bankInfo ? `<tr><td class="k">No. Rekening / Bank</td><td class="v">: ${escapeHtml(bankInfo)}</td></tr>` : ''}
       <tr><td class="k">Periode</td><td class="v">: ${periodLabel}</td></tr>
       <tr><td class="k">Jumlah Transaksi</td><td class="v">: ${L.rows.length}</td></tr>
+      ${filterNote ? `<tr><td class="k">Catatan</td><td class="v">: ${escapeHtml(filterNote)}</td></tr>` : ''}
     </tbody></table>
 
     <section class="pr-summary">

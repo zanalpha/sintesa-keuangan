@@ -18,12 +18,19 @@ router.param('id', (req, res, next, val) => {
 const num = (v) => Number(v); // BIGINT dikembalikan sebagai string oleh pg -> jadikan number
 
 function parseAmount(v) {
-  // Terima angka atau string angka (rupiah bulat, tanpa desimal).
-  const cleaned = String(v == null ? '' : v).replace(/[^\d-]/g, '');
-  if (cleaned === '' || cleaned === '-') return null; // kosong/bukan angka -> tolak
-  const n = Number(cleaned);
-  if (!Number.isInteger(n) || n < 0 || n > 1e15) return null;
-  return n;
+  // Terima HANYA bilangan bulat non-negatif (rupiah, tanpa sen). Penting: TOLAK nilai pecahan
+  // alih-alih diam-diam menggabung digitnya — mis. "1.5" JANGAN menjadi 15, dan "1500000,75"
+  // JANGAN menjadi 150000075 (100x lipat). Pemisah ribuan (1.500.000 / 1,500,000) tetap diterima.
+  if (typeof v === 'number') {
+    return Number.isInteger(v) && v >= 0 && v <= 1e15 ? v : null;
+  }
+  const s = String(v == null ? '' : v).trim();
+  if (s === '' || s.includes('-')) return null; // kosong atau negatif -> tolak
+  if (/[.,]\d{1,2}$/.test(s)) return null; // ada bagian desimal (titik/koma + 1-2 digit di akhir)
+  const digits = s.replace(/\D/g, ''); // buang pemisah ribuan / simbol mata uang
+  if (!/^\d+$/.test(digits)) return null;
+  const n = Number(digits);
+  return Number.isInteger(n) && n <= 1e15 ? n : null;
 }
 
 function validDate(s) {
@@ -47,7 +54,7 @@ function monthRange(month) {
 }
 
 async function bookExists(id) {
-  const { rows } = await query('SELECT id FROM books WHERE id = $1', [id]);
+  const { rows } = await query('SELECT id FROM books WHERE id = $1 AND deleted_at IS NULL', [id]);
   return rows.length > 0;
 }
 
@@ -57,23 +64,25 @@ async function bookExists(id) {
 router.get('/backup', requireAdmin, async (req, res, next) => {
   try {
     res.type('application/json');
-    const books = (await query('SELECT id, name, saldo_awal, bank_info, created_at FROM books ORDER BY id')).rows
+    const books = (await query('SELECT id, name, saldo_awal, bank_info, created_at FROM books WHERE deleted_at IS NULL ORDER BY id')).rows
       .map((b) => ({ ...b, saldo_awal: num(b.saldo_awal) }));
     res.write('{"app":"sintesa-keuangan","version":2,"books":' + JSON.stringify(books) + ',"transactions":[');
     const BATCH = 200;
-    let offset = 0, first = true;
+    // Keyset pagination (WHERE id > lastId), BUKAN OFFSET: kebal terhadap penghapusan baris
+    // yang belum terbaca saat backup berjalan — OFFSET akan menggeser & MELEWATI baris diam-diam.
+    let lastId = 0, first = true;
     for (;;) {
       const { rows } = await query(
         `SELECT id, book_id, type, tanggal, jumlah, keterangan, kategori, bukti, created_at
-           FROM transactions WHERE deleted_at IS NULL ORDER BY id LIMIT $1 OFFSET $2`,
-        [BATCH, offset]
+           FROM transactions WHERE deleted_at IS NULL AND id > $2 ORDER BY id LIMIT $1`,
+        [BATCH, lastId]
       );
       if (rows.length === 0) break;
       for (const t of rows) {
         res.write((first ? '' : ',') + JSON.stringify({ ...t, jumlah: num(t.jumlah) }));
         first = false;
       }
-      offset += rows.length;
+      lastId = rows[rows.length - 1].id;
       if (rows.length < BATCH) break;
     }
     res.write(']}');
@@ -120,12 +129,14 @@ router.post('/restore', requireAdmin, async (req, res, next) => {
         idMap.set(b.id, r.rows[0].id);
         nb++;
       }
+      let skipped = 0, buktiDropped = 0; // jangan buang data diam-diam — hitung & laporkan
       for (const t of txs) {
         const bookId = idMap.get(t.book_id);
-        if (!bookId) continue; // transaksi tanpa buku terpetakan -> lewati
+        if (!bookId) { skipped++; continue; } // transaksi tanpa buku terpetakan
         const { type, tanggal, jumlah, keterangan, kategori } = readTxBody(t);
-        if (!type || !validDate(tanggal) || jumlah === null) continue;
+        if (!type || !validDate(tanggal) || jumlah === null) { skipped++; continue; } // data tak valid
         const nbk = normBukti(t.bukti);
+        if (t.bukti && !nbk.ok) buktiDropped++; // bukti lama tak lolos validasi -> dibuang (dicatat)
         await q(
           `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, bukti, created_by)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
@@ -133,8 +144,9 @@ router.post('/restore', requireAdmin, async (req, res, next) => {
         );
         nt++;
       }
-      await audit({ userId: req.user.id, username: req.user.username, action: 'restore', entity: 'database', detail: `${nb} rekening, ${nt} transaksi (${mode})` }, q);
-      return { books: nb, transactions: nt, mode };
+      const extra = skipped || buktiDropped ? ` — ${skipped} transaksi dilewati, ${buktiDropped} bukti dibuang` : '';
+      await audit({ userId: req.user.id, username: req.user.username, action: 'restore', entity: 'database', detail: `${nb} rekening, ${nt} transaksi (${mode})${extra}` }, q);
+      return { books: nb, transactions: nt, mode, skipped, buktiDropped };
     });
     res.json({ ok: true, ...result });
   } catch (e) {
@@ -152,6 +164,7 @@ router.get('/books', async (req, res, next) => {
               COALESCE(SUM(CASE WHEN t.type = 'keluar' THEN t.jumlah END), 0) AS keluar
          FROM books b
          LEFT JOIN transactions t ON t.book_id = b.id AND t.deleted_at IS NULL
+        WHERE b.deleted_at IS NULL
         GROUP BY b.id, b.name, b.saldo_awal, b.bank_info
         ORDER BY b.id`
     );
@@ -208,7 +221,7 @@ router.patch('/books/:id', requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: 'Nama buku 1-100 karakter.' });
     if (saldo_awal === null) return res.status(400).json({ error: 'Saldo awal tidak valid.' });
     const { rows } = await query(
-      'UPDATE books SET name = $1, saldo_awal = $2, bank_info = $3 WHERE id = $4 RETURNING id, name, saldo_awal, bank_info',
+      'UPDATE books SET name = $1, saldo_awal = $2, bank_info = $3 WHERE id = $4 AND deleted_at IS NULL RETURNING id, name, saldo_awal, bank_info',
       [name, saldo_awal, bank_info, id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Buku tidak ditemukan.' });
@@ -223,16 +236,19 @@ router.patch('/books/:id', requireAdmin, async (req, res, next) => {
 router.delete('/books/:id', requireAdmin, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const bk = await query('SELECT name FROM books WHERE id = $1', [id]);
+    const bk = await query('SELECT name FROM books WHERE id = $1 AND deleted_at IS NULL', [id]);
     if (!bk.rows.length) return res.status(404).json({ error: 'Buku tidak ditemukan.' });
-    // Atomik: hapus transaksi + rekening dalam satu transaksi DB. Bila gagal di tengah,
-    // ROLLBACK memulihkan keduanya (mencegah transaksi hilang sementara rekening tetap ada).
-    await withTransaction(async (q) => {
-      await q('DELETE FROM transactions WHERE book_id = $1', [id]);
-      await q('DELETE FROM books WHERE id = $1', [id]);
-      await audit({ userId: req.user.id, username: req.user.username, action: 'delete', entity: 'book', entityId: id, detail: bk.rows[0].name }, q);
+    // SOFT-DELETE (konsisten dengan penghapusan transaksi): tandai rekening + semua transaksinya
+    // sebagai terhapus alih-alih menghancurkannya. Data & bukti tetap tersimpan (bisa dipulihkan),
+    // tak lagi muncul di daftar/laporan. Atomik: ROLLBACK bila gagal di tengah.
+    const archived = await withTransaction(async (q) => {
+      const tx = await q('UPDATE transactions SET deleted_at = now() WHERE book_id = $1 AND deleted_at IS NULL', [id]);
+      await q('UPDATE books SET deleted_at = now() WHERE id = $1', [id]);
+      const n = tx.rowCount || 0;
+      await audit({ userId: req.user.id, username: req.user.username, action: 'delete', entity: 'book', entityId: id, detail: `${bk.rows[0].name} (+${n} transaksi diarsipkan)` }, q);
+      return n;
     });
-    res.json({ ok: true });
+    res.json({ ok: true, archivedTransactions: archived });
   } catch (e) {
     next(e);
   }
@@ -310,7 +326,7 @@ router.get('/books/:id/summary', async (req, res, next) => {
          FROM transactions WHERE book_id = $1 AND deleted_at IS NULL`,
       [id]
     );
-    const bk = await query('SELECT saldo_awal FROM books WHERE id = $1', [id]);
+    const bk = await query('SELECT saldo_awal FROM books WHERE id = $1 AND deleted_at IS NULL', [id]);
     const saldoAwal = num(bk.rows[0] ? bk.rows[0].saldo_awal : 0);
     const masuk = num(rows[0].masuk);
     const keluar = num(rows[0].keluar);
@@ -381,7 +397,7 @@ router.post('/transfer', requireAdmin, async (req, res, next) => {
     if (!validDate(tanggal)) return res.status(400).json({ error: 'Tanggal tidak valid.' });
     if (jumlah === null || jumlah <= 0) return res.status(400).json({ error: 'Jumlah tidak valid.' });
 
-    const bk = await query('SELECT id, name FROM books WHERE id IN ($1, $2)', [fromId, toId]);
+    const bk = await query('SELECT id, name FROM books WHERE id IN ($1, $2) AND deleted_at IS NULL', [fromId, toId]);
     if (bk.rows.length !== 2) return res.status(404).json({ error: 'Rekening tidak ditemukan.' });
     const nameOf = (id) => (bk.rows.find((r) => r.id === id) || {}).name || '';
 

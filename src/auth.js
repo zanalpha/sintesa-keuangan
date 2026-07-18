@@ -8,6 +8,11 @@ const router = express.Router();
 
 const BCRYPT_COST = 12; // di atas anjuran OWASP (>=12); untuk sedikit user, biayanya tak terasa.
 
+// Hash bcrypt "boneka" (tak cocok dengan password apa pun yang dipakai user). Saat username
+// TIDAK ada, kita tetap menjalankan bcrypt.compare terhadap hash ini agar waktu respons login
+// sama dengan kasus "username ada, password salah" — menutup celah enumerasi akun via timing.
+const DUMMY_HASH = '$2a$12$8qkQ5b0guZOLbjeiH4NHCOfm6HzIyVnvGoWbway6Ib5PJrBw9EJO.';
+
 // ---- Anti brute-force: dibatasi per-IP DAN per-akun ----
 const WINDOW_MS = 15 * 60 * 1000;
 const IP_MAX = 20; // satu IP kantor bisa dipakai banyak orang -> longgar
@@ -29,6 +34,17 @@ function noteFailure(map, key) {
   if (!rec || Date.now() - rec.first > WINDOW_MS) map.set(key, { count: 1, first: Date.now() });
   else rec.count += 1;
 }
+
+// Bersihkan entri kedaluwarsa secara berkala. TANPA ini, penyerang yang menyemprot ribuan
+// username/IP acak akan menumpuk entri yang tak pernah terhapus -> memori tumbuh tak terbatas
+// (kebocoran memori / DoS lambat). Timer di-unref agar tak menahan proses tetap hidup.
+function sweepAttempts() {
+  const now = Date.now();
+  for (const [k, rec] of ipAttempts) if (now - rec.first > WINDOW_MS) ipAttempts.delete(k);
+  for (const [k, rec] of userAttempts) if (now - rec.first > WINDOW_MS) userAttempts.delete(k);
+}
+const sweepTimer = setInterval(sweepAttempts, WINDOW_MS);
+if (sweepTimer.unref) sweepTimer.unref();
 
 // ---- Helper ----
 function publicUser(row) {
@@ -73,11 +89,18 @@ function requireAdmin(req, res, next) {
 async function loadUser(req, res, next) {
   try {
     if (req.session && req.session.userId) {
-      const { rows } = await query('SELECT id, username, name, role FROM users WHERE id = $1', [
+      const { rows } = await query('SELECT id, username, name, role, session_epoch FROM users WHERE id = $1', [
         req.session.userId,
       ]);
-      req.user = rows[0] || null;
-      if (!req.user) req.session = null; // user terhapus -> reset sesi
+      const u = rows[0] || null;
+      if (!u) {
+        req.user = null; req.session = null; // user terhapus -> reset sesi
+      } else if ((req.session.epoch || 0) !== u.session_epoch) {
+        // Password telah diganti (di sesi/perangkat lain) -> sesi lama dicabut.
+        req.user = null; req.session = null;
+      } else {
+        req.user = u;
+      }
     }
     next();
   } catch (e) {
@@ -153,7 +176,10 @@ router.post('/login', async (req, res, next) => {
 
     const { rows } = await query('SELECT * FROM users WHERE username = $1', [username]);
     const user = rows[0];
-    const ok = user && (await bcrypt.compare(password, user.password_hash));
+    // Selalu jalankan bcrypt.compare — pakai hash boneka bila user tak ada — agar waktu
+    // respons tak membocorkan apakah sebuah username terdaftar (anti-enumerasi).
+    const match = await bcrypt.compare(password, user ? user.password_hash : DUMMY_HASH);
+    const ok = !!user && match;
 
     if (!ok) {
       noteFailure(ipAttempts, ip);
@@ -163,16 +189,22 @@ router.post('/login', async (req, res, next) => {
 
     ipAttempts.delete(ip);
     userAttempts.delete(username);
-    req.session = { userId: user.id };
+    req.session = { userId: user.id, epoch: user.session_epoch || 0 };
+    await audit({ userId: user.id, username: user.username, action: 'login', entity: 'user', entityId: user.id });
     res.json({ user: publicUser(user) });
   } catch (e) {
     next(e);
   }
 });
 
-router.post('/logout', (req, res) => {
-  req.session = null;
-  res.json({ ok: true });
+router.post('/logout', async (req, res, next) => {
+  try {
+    if (req.user) await audit({ userId: req.user.id, username: req.user.username, action: 'logout', entity: 'user', entityId: req.user.id });
+    req.session = null;
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
 });
 
 // Ganti password sendiri.
@@ -182,11 +214,14 @@ router.post('/password', requireAuth, async (req, res, next) => {
     const next_ = String(req.body.new_password || '');
     const pwErr = passwordError(next_, req.user && req.user.username);
     if (pwErr) return res.status(400).json({ error: pwErr });
-    const { rows } = await query('SELECT password_hash FROM users WHERE id = $1', [req.session.userId]);
+    const { rows } = await query('SELECT password_hash, session_epoch FROM users WHERE id = $1', [req.session.userId]);
     const ok = rows[0] && (await bcrypt.compare(current, rows[0].password_hash));
     if (!ok) return res.status(401).json({ error: 'Password lama salah.' });
     const hash = await bcrypt.hash(next_, BCRYPT_COST);
-    await query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, req.session.userId]);
+    // Naikkan epoch: mencabut SEMUA sesi lama (mis. cookie yang bocor / perangkat lain).
+    const newEpoch = (rows[0].session_epoch || 0) + 1;
+    await query('UPDATE users SET password_hash = $1, session_epoch = $2 WHERE id = $3', [hash, newEpoch, req.session.userId]);
+    req.session.epoch = newEpoch; // pertahankan sesi SAAT INI agar tak ikut ter-logout
     await audit({ userId: req.user.id, username: req.user.username, action: 'password_change', entity: 'user', entityId: req.user.id });
     res.json({ ok: true });
   } catch (e) {
@@ -194,8 +229,9 @@ router.post('/password', requireAuth, async (req, res, next) => {
   }
 });
 
-// Daftar pengguna (untuk halaman kelola pengguna).
-router.get('/users', requireAuth, async (req, res, next) => {
+// Daftar pengguna (untuk halaman kelola pengguna) — hanya admin. Viewer tak perlu (dan tak
+// boleh) mengenumerasi daftar akun; halaman "Kelola pengguna" memang khusus admin.
+router.get('/users', requireAdmin, async (req, res, next) => {
   try {
     const { rows } = await query('SELECT id, username, name, role, created_at FROM users ORDER BY id');
     res.json({ users: rows });
