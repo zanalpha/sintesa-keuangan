@@ -9,7 +9,7 @@ module.exports = [
     files: ['src/**/*.js', 'test/**/*.js', 'eslint.config.js'],
     languageOptions: { ecmaVersion: 2022, sourceType: 'commonjs' },
     rules: {
-      'no-unused-vars': ['warn', { argsIgnorePattern: '^_|^next$', varsIgnorePattern: '^_' }],
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_|^next$', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
       'no-undef': 'off',
       'no-var': 'warn',
       eqeqeq: ['warn', 'smart'],
@@ -21,7 +21,7 @@ module.exports = [
     files: ['public/**/*.js'],
     languageOptions: { ecmaVersion: 2022, sourceType: 'module' },
     rules: {
-      'no-unused-vars': 'warn',
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
       'no-undef': 'off',
     },
   },

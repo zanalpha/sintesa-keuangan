@@ -5,7 +5,7 @@
    Frontend tanpa bundler — ES modules native (script type="module").
    Modul murni: js/format.js (formatter), js/csv.js (impor), js/ledger.js (saldo berjalan).
    ============================================================ */
-import { rupiah, BULAN_S, tanggalIndo, labelBulan, todayISO, pad2, escapeHtml, slug, csvCell, downloadBlob } from './js/format.js';
+import { rupiah, BULAN_S, tanggalIndo, labelBulan, todayISO, escapeHtml, slug, csvCell, downloadBlob } from './js/format.js';
 import { parseCsv, rowsToTransactions } from './js/csv.js';
 import { computeLedger } from './js/ledger.js';
 
@@ -136,7 +136,7 @@ async function bootStatus() {
       else showAuth();
       $('boot-loading').classList.add('hidden');
       return;
-    } catch (e) {
+    } catch (_) {
       if (i < attempts) { await sleep(3000); continue; }
       // Semua percobaan gagal → jangan sembunyikan masalah; tampilkan pesan + tombol coba lagi.
       if (spinner) spinner.classList.add('hidden');
@@ -542,16 +542,19 @@ $('tx-form').addEventListener('submit', async (e) => {
     if (isNew) { await api('POST', `/api/books/${state.bookId}/transactions`, payload); toast('Transaksi ditambahkan.'); }
     else { await api('PATCH', `/api/transactions/${f.id.value}`, payload); toast('Transaksi diperbarui.'); }
     const again = isNew && $('tx-again').checked;
-    await loadData();
     if (again) {
-      // Entri cepat berturut-turut: buka ulang modal bersih, pertahankan jenis & tanggal.
+      // Entri cepat berturut-turut: perlu data terbaru sebelum membuka ulang modal.
+      await loadData();
       const type = f.type.value, tanggal = f.tanggal.value;
       openTxModal(type);
       $('tx-form').tanggal.value = tanggal;
       $('tx-again').checked = true;
       setTimeout(() => $('tx-form').jumlah.focus(), 60);
     } else {
+      // Tutup modal SEKETIKA setelah simpan sukses (terasa instan), lalu segarkan daftar
+      // di latar — tak perlu menunggu pengambilan ulang seluruh transaksi selesai.
       closeModals();
+      loadData().catch(() => toast('Tersimpan. Gagal memuat ulang daftar — silakan segarkan halaman.', true));
     }
   } catch (err) { $('tx-error').textContent = err.message; }
   finally {
