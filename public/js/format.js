@@ -17,6 +17,27 @@ export function todayISO() {
 }
 export function pad2(n) { return String(n).padStart(2, '0'); }
 
+/** Apakah string berbentuk YYYY-MM. */
+export function isYearMonth(ym) { return /^\d{4}-\d{2}$/.test(ym); }
+
+/** Geser bulan YYYY-MM sebanyak `delta` bulan (boleh negatif). */
+export function shiftMonth(ym, delta) {
+  if (!isYearMonth(ym)) return '';
+  let [y, m] = ym.split('-').map(Number);
+  m += Number(delta) || 0;
+  while (m > 12) { m -= 12; y += 1; }
+  while (m < 1) { m += 12; y -= 1; }
+  return `${y}-${pad2(m)}`;
+}
+
+/** Daftar bulan dari `fromYm` sampai `toYm` inklusif (naik). */
+export function monthsBetween(fromYm, toYm) {
+  if (!isYearMonth(fromYm) || !isYearMonth(toYm) || fromYm > toYm) return [];
+  const out = [];
+  for (let cur = fromYm; cur <= toYm; cur = shiftMonth(cur, 1)) out.push(cur);
+  return out;
+}
+
 export function escapeHtml(s) {
   return String(s || '').replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

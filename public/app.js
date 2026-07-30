@@ -5,7 +5,7 @@
    Frontend tanpa bundler — ES modules native (script type="module").
    Modul murni: js/format.js (formatter), js/csv.js (impor), js/ledger.js (saldo berjalan).
    ============================================================ */
-import { rupiah, BULAN_S, tanggalIndo, labelBulan, todayISO, escapeHtml, slug, csvCell, downloadBlob } from './js/format.js';
+import { rupiah, BULAN_S, tanggalIndo, labelBulan, todayISO, escapeHtml, slug, csvCell, downloadBlob, isYearMonth, shiftMonth, monthsBetween } from './js/format.js';
 import { parseCsv, rowsToTransactions } from './js/csv.js';
 import { computeLedger } from './js/ledger.js';
 
@@ -250,8 +250,41 @@ function buildAnaScope() {
   state.anaScope = sel.value;
 }
 
+// Bulan ekstra yang ditambahkan pengguna (bisa kosong / belum ada transaksi).
+// Disimpan di localStorage agar bulan ke depan tetap tersedia setelah reload.
+const EXTRA_MONTHS_KEY = 'sintesa_extra_months';
+const FUTURE_MONTHS = 6; // otomatis sediakan 6 bulan ke depan dari bulan berjalan
+
+function loadExtraMonths() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(EXTRA_MONTHS_KEY) || '[]');
+    return Array.isArray(raw) ? raw.filter(isYearMonth) : [];
+  } catch (_) { return []; }
+}
+function saveExtraMonths(list) {
+  try { localStorage.setItem(EXTRA_MONTHS_KEY, JSON.stringify([...new Set(list.filter(isYearMonth))])); }
+  catch (_) { /* private mode / quota */ }
+}
+function addExtraMonth(ym) {
+  if (!isYearMonth(ym)) return false;
+  const list = loadExtraMonths();
+  if (!list.includes(ym)) {
+    list.push(ym);
+    saveExtraMonths(list);
+  }
+  return true;
+}
+
+/** Kumpulkan opsi bulan: data transaksi + bulan ini + 6 bulan ke depan + ekstra manual. */
+function availableMonths() {
+  const fromTx = state.transactions.map((t) => t.tanggal.slice(0, 7)).filter(isYearMonth);
+  const nowYm = todayISO().slice(0, 7);
+  const horizon = monthsBetween(nowYm, shiftMonth(nowYm, FUTURE_MONTHS));
+  return [...new Set([...fromTx, ...horizon, ...loadExtraMonths()])].sort().reverse();
+}
+
 function buildMonthFilter() {
-  const months = [...new Set(state.transactions.map((t) => t.tanggal.slice(0, 7)))].sort().reverse();
+  const months = availableMonths();
   const sel = $('month-filter');
   const current = state.month;
   sel.innerHTML = '<option value="">Semua bulan</option>';
@@ -260,8 +293,17 @@ function buildMonthFilter() {
     o.value = m; o.textContent = labelBulan(m);
     sel.appendChild(o);
   }
+  // Pertahankan pilihan aktif (termasuk bulan ke depan yang belum ada data).
   sel.value = months.includes(current) ? current : '';
   state.month = sel.value;
+}
+
+/** Tanggal default saat tambah transaksi: ikuti filter bulan bila aktif. */
+function defaultTanggalForNewTx() {
+  const today = todayISO();
+  if (!state.month || !isYearMonth(state.month)) return today;
+  if (today.startsWith(state.month)) return today;
+  return `${state.month}-01`;
 }
 
 // ============================================================
@@ -328,7 +370,10 @@ function renderColumn(type, list) {
   const tbody = $('tbody-' + type);
   tbody.innerHTML = '';
   if (list.length === 0) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="5">Belum ada data</td></tr>`;
+    const emptyMsg = state.month
+      ? `Belum ada data di ${labelBulan(state.month)} — klik + untuk menambah`
+      : 'Belum ada data';
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="5">${emptyMsg}</td></tr>`;
   } else {
     list.forEach((t, i) => {
       const tr = document.createElement('tr');
@@ -519,7 +564,7 @@ function openTxModal(type, tx) {
   $('bukti-file').value = '';
   f.type.value = type;
   f.id.value = tx ? tx.id : '';
-  f.tanggal.value = tx ? tx.tanggal : todayISO();
+  f.tanggal.value = tx ? tx.tanggal : defaultTanggalForNewTx();
   f.jumlah.value = tx ? new Intl.NumberFormat('id-ID').format(tx.jumlah) : '';
   f.keterangan.value = tx ? tx.keterangan : '';
   f.kategori.value = tx ? tx.kategori : '';
@@ -1136,6 +1181,24 @@ function wireStaticHandlers() {
     loadData();
   });
   $('month-filter').addEventListener('change', (e) => { state.month = e.target.value; render(); });
+  // Tombol "+ Bulan": buka pemilih bulan native, lalu masukkan ke filter (termasuk bulan ke depan).
+  const addMonthBtn = $('add-month-btn');
+  const addMonthPicker = $('add-month-picker');
+  if (addMonthBtn && addMonthPicker) {
+    addMonthBtn.addEventListener('click', () => {
+      addMonthPicker.value = state.month || todayISO().slice(0, 7);
+      try { addMonthPicker.showPicker(); }
+      catch (_) { addMonthPicker.focus(); addMonthPicker.click(); }
+    });
+    addMonthPicker.addEventListener('change', () => {
+      const ym = addMonthPicker.value;
+      if (!addExtraMonth(ym)) return;
+      state.month = ym;
+      buildMonthFilter();
+      render();
+      toast(`Bulan ${labelBulan(ym)} ditambahkan. Silakan catat transaksi.`);
+    });
+  }
   $('kategori-filter').addEventListener('change', (e) => { state.kategori = e.target.value; render(); });
   $('ana-scope').addEventListener('change', (e) => { state.anaScope = e.target.value; render(); });
   let searchTimer;
