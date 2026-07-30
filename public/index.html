@@ -79,6 +79,35 @@
       </div>
 
       <main class="container">
+        <!-- Alert saldo rendah -->
+        <section id="low-balance-alert" class="alert-banner hidden" role="status" aria-live="polite"></section>
+
+        <!-- Ringkasan beranda (bulan berjalan, tanpa filter) -->
+        <section class="home-dash" id="home-dash" aria-label="Ringkasan bulan ini">
+          <div class="home-dash-head">
+            <h2 class="home-dash-title">Bulan Ini</h2>
+            <span class="home-dash-month" id="home-month-label"></span>
+          </div>
+          <div class="home-dash-stats">
+            <div class="home-stat home-stat-in">
+              <span class="home-stat-label">Masuk</span>
+              <span class="home-stat-value" id="home-masuk">Rp0</span>
+            </div>
+            <div class="home-stat home-stat-out">
+              <span class="home-stat-label">Keluar</span>
+              <span class="home-stat-value" id="home-keluar">Rp0</span>
+            </div>
+            <div class="home-stat home-stat-net">
+              <span class="home-stat-label">Sisa bulan</span>
+              <span class="home-stat-value" id="home-sisa">Rp0</span>
+            </div>
+          </div>
+          <div class="home-recent">
+            <h3>5 Transaksi Terakhir</h3>
+            <ul id="home-recent-list" class="home-recent-list"></ul>
+          </div>
+        </section>
+
         <!-- Info buku -->
         <section class="book-info" id="book-info"></section>
 
@@ -143,6 +172,7 @@
         </section>
 
         <!-- ===== CATATAN (dua kolom) ===== -->
+        <p class="ledger-swipe-hint" aria-hidden="true">Geser ke samping untuk Pemasukan / Pengeluaran</p>
         <section class="ledger" id="ledger-view" role="tabpanel" aria-labelledby="tab-catatan">
           <div class="ledger-col">
             <div class="ledger-head ledger-head-in">
@@ -214,9 +244,26 @@
             <div class="chart-card"><h3>Pengeluaran per Kategori</h3><div id="breakdown-keluar" class="breakdown"></div></div>
             <div class="chart-card"><h3>Pemasukan per Kategori</h3><div id="breakdown-masuk" class="breakdown"></div></div>
           </div>
+          <div class="chart-card tax-card">
+            <div class="chart-head">
+              <h3>Ringkasan Pajak (Perkiraan)</h3>
+              <label class="field-inline">
+                <span>Bulan</span>
+                <input id="tax-month" type="month" />
+              </label>
+            </div>
+            <p class="muted tax-disclaimer">Perkiraan internal berdasarkan data transaksi — <strong>bukan e-filing</strong>. Sesuaikan dengan konsultan pajak Anda.</p>
+            <div id="tax-summary" class="tax-summary"></div>
+          </div>
           <p class="analytics-empty hidden" id="analytics-empty">Belum ada data untuk dianalisis.</p>
         </section>
       </main>
+
+      <!-- FAB input cepat (HP) -->
+      <div class="mobile-fab admin-only" id="mobile-fab" aria-label="Tambah transaksi cepat">
+        <button type="button" class="fab fab-in" data-add="masuk" title="Pemasukan baru">＋ Masuk</button>
+        <button type="button" class="fab fab-out" data-add="keluar" title="Pengeluaran baru">＋ Keluar</button>
+      </div>
     </div>
 
     <!-- ======================= LAPORAN CETAK / PDF =======================
@@ -225,9 +272,12 @@
     <div id="print-report" class="print-report" aria-hidden="true"></div>
 
     <!-- ======================= MODAL TRANSAKSI ======================= -->
-    <div id="tx-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="tx-modal-title">
-      <div class="modal-box">
-        <h3 id="tx-modal-title">Tambah Transaksi</h3>
+    <div id="tx-modal" class="modal modal-tx hidden" role="dialog" aria-modal="true" aria-labelledby="tx-modal-title">
+      <div class="modal-box modal-box-tx">
+        <div class="modal-tx-bar">
+          <h3 id="tx-modal-title">Tambah Transaksi</h3>
+          <button type="button" class="btn btn-ghost btn-sm modal-tx-close" data-close aria-label="Tutup">✕</button>
+        </div>
         <form id="tx-form">
           <input type="hidden" name="id" /><input type="hidden" name="type" />
           <label>Tanggal<input name="tanggal" type="date" required /></label>
@@ -260,6 +310,10 @@
           <label>Nama Rekening<input name="name" maxlength="100" required placeholder="mis. BCA / KOPRA MANDIRI" /></label>
           <label>Saldo Awal (Rp)<input name="saldo_awal" inputmode="numeric" autocomplete="off" placeholder="0" /></label>
           <label>Nomor Rekening / Bank<input name="bank_info" maxlength="200" placeholder="mis. BANK BCA 0562593452" /></label>
+          <label>Ambang Saldo Rendah (Rp)
+            <input name="ambang_saldo" inputmode="numeric" autocomplete="off" placeholder="0 = nonaktif" />
+          </label>
+          <p class="muted" style="margin:-6px 0 12px;font-size:12px">Peringatan muncul bila saldo rekening di bawah ambang ini.</p>
           <p class="form-error" role="alert" id="book-error"></p>
           <div class="modal-actions">
             <button type="button" class="btn btn-danger btn-sm hidden" id="book-delete">🗑 Hapus Rekening</button>

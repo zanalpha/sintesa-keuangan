@@ -167,6 +167,8 @@ async function migrate() {
   // Kolom tambahan (dijalankan setelah tabel ada; aman diulang di pg & pg-mem).
   await addColumn('books', "saldo_awal BIGINT NOT NULL DEFAULT 0", 'saldo_awal');
   await addColumn('books', "bank_info TEXT NOT NULL DEFAULT ''", 'bank_info');
+  // Ambang peringatan saldo rendah; 0 = nonaktif.
+  await addColumn('books', 'ambang_saldo BIGINT NOT NULL DEFAULT 0', 'ambang_saldo');
   await addColumn('transactions', 'bukti TEXT', 'bukti'); // data URL gambar/pdf, boleh kosong
   await addColumn('transactions', 'deleted_at TIMESTAMPTZ', 'deleted_at'); // soft-delete transaksi
   await addColumn('books', 'deleted_at TIMESTAMPTZ', 'deleted_at'); // soft-delete rekening (bisa dipulihkan)

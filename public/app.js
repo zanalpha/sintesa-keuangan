@@ -97,6 +97,7 @@ const state = {
   besarFrom: '',
   besarTo: '',
   anaScope: '',    // '' = gabungan semua rekening; atau id rekening tertentu
+  taxMonth: '',    // YYYY-MM untuk ringkasan pajak
   view: 'catatan', // 'catatan' | 'besar' | 'analitik'
 };
 
@@ -342,9 +343,57 @@ function render() {
   renderColumn('masuk', rows.filter((t) => t.type === 'masuk'));
   renderColumn('keluar', rows.filter((t) => t.type === 'keluar'));
   updateKategoriList();
+  renderHomeDash();
+  renderLowBalanceAlert();
 
   if (state.view === 'besar') renderBukuBesar();
   if (state.view === 'analitik') renderAnalytics();
+}
+
+/** Ringkasan beranda: selalu bulan kalender berjalan (tidak ikut filter Catatan). */
+function renderHomeDash() {
+  const ym = todayISO().slice(0, 7);
+  const elLabel = $('home-month-label');
+  if (elLabel) elLabel.textContent = labelBulan(ym);
+  const book = curBook();
+  const tx = state.transactions.filter((t) => t.tanggal.slice(0, 7) === ym);
+  const masuk = tx.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
+  const keluar = tx.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
+  $('home-masuk').textContent = rupiah(masuk);
+  $('home-keluar').textContent = rupiah(keluar);
+  $('home-sisa').textContent = rupiah(masuk - keluar);
+
+  const recent = [...state.transactions]
+    .sort((a, b) => (a.tanggal < b.tanggal ? 1 : a.tanggal > b.tanggal ? -1 : b.id - a.id))
+    .slice(0, 5);
+  const list = $('home-recent-list');
+  if (!list) return;
+  if (!recent.length) {
+    list.innerHTML = `<li class="home-recent-empty">Belum ada transaksi di ${escapeHtml(book ? book.name : 'rekening ini')}.</li>`;
+    return;
+  }
+  list.innerHTML = recent.map((t) => {
+    const sign = t.type === 'masuk' ? '+' : '−';
+    const cls = t.type === 'masuk' ? 'in' : 'out';
+    const ket = escapeHtml(t.keterangan) || (t.type === 'masuk' ? 'Pemasukan' : 'Pengeluaran');
+    return `<li>
+      <span class="hr-date">${tanggalIndo(t.tanggal)}</span>
+      <span class="hr-ket">${ket}${t.kategori ? ` <span class="muted">· ${escapeHtml(t.kategori)}</span>` : ''}</span>
+      <span class="hr-amt ${cls}">${sign}${rupiah(t.jumlah)}</span>
+    </li>`;
+  }).join('');
+}
+
+/** Banner peringatan bila saldo rekening di bawah ambang yang diset. */
+function renderLowBalanceAlert() {
+  const el = $('low-balance-alert');
+  if (!el) return;
+  const low = state.books.filter((b) => (b.ambang_saldo || 0) > 0 && (b.sisa ?? 0) < b.ambang_saldo);
+  if (!low.length) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+  el.classList.remove('hidden');
+  el.innerHTML = `<strong>Saldo rendah</strong>` + low.map((b) =>
+    `<div class="alert-item">${escapeHtml(b.name)}: saldo ${rupiah(b.sisa)} (ambang ${rupiah(b.ambang_saldo)})</div>`
+  ).join('');
 }
 
 function renderBookInfo({ analitik, book, scopeBook, saldoAwal, txCount }) {
@@ -462,6 +511,8 @@ function setView(view) {
   $('tools-catatan').classList.toggle('hidden', view !== 'catatan');
   $('tools-besar').classList.toggle('hidden', view !== 'besar');
   $('tools-analitik').classList.toggle('hidden', view !== 'analitik');
+  const swipeHint = document.querySelector('.ledger-swipe-hint');
+  if (swipeHint) swipeHint.classList.toggle('hidden', view !== 'catatan');
   render();
 }
 
@@ -662,6 +713,7 @@ function openBookModal(book) {
   f.name.value = book ? book.name : '';
   f.saldo_awal.value = book && book.saldo_awal ? new Intl.NumberFormat('id-ID').format(book.saldo_awal) : '';
   f.bank_info.value = book ? book.bank_info || '' : '';
+  f.ambang_saldo.value = book && book.ambang_saldo ? new Intl.NumberFormat('id-ID').format(book.ambang_saldo) : '';
   $('book-modal-title').textContent = book ? 'Pengaturan Rekening' : 'Rekening Baru';
   // Tombol hapus hanya saat mengubah rekening yang ada, dan bila lebih dari satu rekening.
   $('book-delete').classList.toggle('hidden', !(book && state.books.length > 1));
@@ -670,11 +722,17 @@ function openBookModal(book) {
   setTimeout(() => f.name.focus(), 50);
 }
 $('book-form').saldo_awal.addEventListener('input', formatMoneyInput);
+$('book-form').ambang_saldo.addEventListener('input', formatMoneyInput);
 $('book-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
   $('book-error').textContent = '';
-  const payload = { name: f.name.value, saldo_awal: f.saldo_awal.value.replace(/\D/g, ''), bank_info: f.bank_info.value };
+  const payload = {
+    name: f.name.value,
+    saldo_awal: f.saldo_awal.value.replace(/\D/g, ''),
+    bank_info: f.bank_info.value,
+    ambang_saldo: f.ambang_saldo.value.replace(/\D/g, '') || '0',
+  };
   withSubmitLock(f, 'Menyimpan…', async () => {
     try {
       if (f.id.value) { await api('PATCH', `/api/books/${f.id.value}`, payload); toast('Rekening diperbarui.'); }
@@ -1018,6 +1076,7 @@ function buildPrintReport() {
   }
 
   const html = `
+    <div class="pr-watermark" aria-hidden="true"><span>RAHASIA</span></div>
     <header class="pr-head">
       <div class="pr-brand">
         <img class="pr-mark" src="/logo.svg" alt="Logo PT Sintesa Data Semesta" width="44" height="44" />
@@ -1151,6 +1210,16 @@ function trapModalTab(e) {
 function wireStaticHandlers() {
   document.querySelectorAll('[data-add]').forEach((btn) =>
     btn.addEventListener('click', () => openTxModal(btn.dataset.add)));
+
+  const taxMonth = $('tax-month');
+  if (taxMonth) {
+    taxMonth.value = todayISO().slice(0, 7);
+    state.taxMonth = taxMonth.value;
+    taxMonth.addEventListener('change', (e) => {
+      state.taxMonth = e.target.value || todayISO().slice(0, 7);
+      if (state.view === 'analitik') renderTaxSummary();
+    });
+  }
 
   $('ledger-view').addEventListener('click', async (e) => {
     const buktiId = e.target.dataset.bukti, editId = e.target.dataset.edit, delId = e.target.dataset.del;
@@ -1328,15 +1397,63 @@ function renderAnalytics() {
   const has = anaTx().length > 0;
   $('analytics-empty').classList.toggle('hidden', has);
   const ids = ['compare', 'rekening-summary', 'stat-tiles', 'chart-monthly', 'chart-balance', 'breakdown-keluar', 'breakdown-masuk'];
-  if (!has) { ids.forEach((id) => ($(id).innerHTML = '')); return; }
-  const months = monthlyAgg();
-  renderCompare();
-  renderRekeningSummary();
-  renderTiles(months);
-  renderMonthlyChart(months);
-  renderBalanceChart(months);
-  renderBreakdown('keluar', $('breakdown-keluar'));
-  renderBreakdown('masuk', $('breakdown-masuk'));
+  if (!has) ids.forEach((id) => { if ($(id)) $(id).innerHTML = ''; });
+  else {
+    const months = monthlyAgg();
+    renderCompare();
+    renderRekeningSummary();
+    renderTiles(months);
+    renderMonthlyChart(months);
+    renderBalanceChart(months);
+    renderBreakdown('keluar', $('breakdown-keluar'));
+    renderBreakdown('masuk', $('breakdown-masuk'));
+  }
+  ensureTaxMonth();
+  renderTaxSummary();
+}
+
+const PPN_RATE = 0.11;       // PPN 11%
+const PPH_UMKM_RATE = 0.005; // PPh final UMKM 0,5% (perkiraan)
+
+function ensureTaxMonth() {
+  const inp = $('tax-month');
+  if (!inp) return;
+  if (!state.taxMonth) state.taxMonth = todayISO().slice(0, 7);
+  if (inp.value !== state.taxMonth) inp.value = state.taxMonth;
+}
+
+/** Ringkasan pajak sederhana (bukan e-filing) untuk bulan terpilih di scope analitik. */
+function renderTaxSummary() {
+  const box = $('tax-summary');
+  if (!box) return;
+  const ym = state.taxMonth || todayISO().slice(0, 7);
+  const tx = anaTx().filter((t) => t.tanggal.slice(0, 7) === ym);
+  const dpp = tx.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
+  const keluar = tx.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
+  // PPN masukan: pengeluaran berkategori mengandung "ppn" / "pajak masuk"
+  const ppnMasukan = tx.filter((t) => {
+    if (t.type !== 'keluar') return false;
+    const k = (t.kategori || '').toLowerCase();
+    return /ppn|pajak\s*masuk/.test(k);
+  }).reduce((s, t) => s + t.jumlah, 0);
+  const ppnKeluaran = Math.round(dpp * PPN_RATE);
+  const ppnNet = ppnKeluaran - ppnMasukan;
+  const pph = Math.round(dpp * PPH_UMKM_RATE);
+
+  box.innerHTML = `
+    <div class="tax-box"><div class="tb-label">DPP / Omzet (pemasukan)</div><div class="tb-value">${rupiah(dpp)}</div>
+      <div class="tb-note">${labelBulan(ym)}</div></div>
+    <div class="tax-box"><div class="tb-label">Total Pengeluaran</div><div class="tb-value">${rupiah(keluar)}</div></div>
+    <div class="tax-box"><div class="tb-label">Estimasi PPN Keluaran 11%</div><div class="tb-value">${rupiah(ppnKeluaran)}</div>
+      <div class="tb-note">11% × DPP</div></div>
+    <div class="tax-box"><div class="tb-label">PPN Masukan (kategori PPN)</div><div class="tb-value">${rupiah(ppnMasukan)}</div>
+      <div class="tb-note">Dari kategori berisi “PPN” / “Pajak Masuk”</div></div>
+    <div class="tax-box"><div class="tb-label">PPN Kurang / Lebih Bayar</div><div class="tb-value">${rupiah(ppnNet)}</div>
+      <div class="tb-note">${ppnNet >= 0 ? 'Kurang bayar (perkiraan)' : 'Lebih bayar (perkiraan)'}</div></div>
+    <div class="tax-box"><div class="tb-label">Estimasi PPh Final 0,5%</div><div class="tb-value">${rupiah(pph)}</div>
+      <div class="tb-note">Skema UMKM — sesuaikan bila tarif berbeda</div></div>
+    <div class="tax-box wide"><div class="tb-label">Catatan</div>
+      <div class="tb-note">Angka ini ringkasan internal dari buku kas. Bukan SPT, bukan e-filing, dan tidak menggantikan perhitungan resmi konsultan pajak.</div></div>`;
 }
 
 function renderRekeningSummary() {

@@ -64,8 +64,8 @@ async function bookExists(id) {
 router.get('/backup', requireAdmin, async (req, res, next) => {
   try {
     res.type('application/json');
-    const books = (await query('SELECT id, name, saldo_awal, bank_info, created_at FROM books WHERE deleted_at IS NULL ORDER BY id')).rows
-      .map((b) => ({ ...b, saldo_awal: num(b.saldo_awal) }));
+    const books = (await query('SELECT id, name, saldo_awal, bank_info, ambang_saldo, created_at FROM books WHERE deleted_at IS NULL ORDER BY id')).rows
+      .map((b) => ({ ...b, saldo_awal: num(b.saldo_awal), ambang_saldo: num(b.ambang_saldo) }));
     res.write('{"app":"sintesa-keuangan","version":2,"books":' + JSON.stringify(books) + ',"transactions":[');
     const BATCH = 200;
     // Keyset pagination (WHERE id > lastId), BUKAN OFFSET: kebal terhadap penghapusan baris
@@ -122,9 +122,10 @@ router.post('/restore', requireAdmin, async (req, res, next) => {
         const name = String(b.name || '').trim().slice(0, 100) || 'Rekening';
         const saldo = parseAmount(b.saldo_awal) ?? 0;
         const bank = String(b.bank_info || '').trim().slice(0, 200);
+        const ambang = parseAmount(b.ambang_saldo) ?? 0;
         const r = await q(
-          'INSERT INTO books (name, saldo_awal, bank_info, created_by) VALUES ($1,$2,$3,$4) RETURNING id',
-          [name, saldo, bank, req.session.userId]
+          'INSERT INTO books (name, saldo_awal, bank_info, ambang_saldo, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+          [name, saldo, bank, ambang, req.session.userId]
         );
         idMap.set(b.id, r.rows[0].id);
         nb++;
@@ -159,13 +160,13 @@ router.post('/restore', requireAdmin, async (req, res, next) => {
 router.get('/books', async (req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT b.id, b.name, b.saldo_awal, b.bank_info,
+      `SELECT b.id, b.name, b.saldo_awal, b.bank_info, b.ambang_saldo,
               COALESCE(SUM(CASE WHEN t.type = 'masuk'  THEN t.jumlah END), 0) AS masuk,
               COALESCE(SUM(CASE WHEN t.type = 'keluar' THEN t.jumlah END), 0) AS keluar
          FROM books b
          LEFT JOIN transactions t ON t.book_id = b.id AND t.deleted_at IS NULL
         WHERE b.deleted_at IS NULL
-        GROUP BY b.id, b.name, b.saldo_awal, b.bank_info
+        GROUP BY b.id, b.name, b.saldo_awal, b.bank_info, b.ambang_saldo
         ORDER BY b.id`
     );
     const books = rows.map((r) => ({
@@ -173,6 +174,7 @@ router.get('/books', async (req, res, next) => {
       name: r.name,
       saldo_awal: num(r.saldo_awal),
       bank_info: r.bank_info || '',
+      ambang_saldo: num(r.ambang_saldo),
       masuk: num(r.masuk),
       keluar: num(r.keluar),
       sisa: num(r.saldo_awal) + num(r.masuk) - num(r.keluar),
@@ -189,24 +191,31 @@ function readBookBody(body) {
   // Saldo awal boleh kosong -> dianggap 0.
   const saldo_awal =
     rawSaldo == null || String(rawSaldo).trim() === '' ? 0 : parseAmount(rawSaldo);
+  const rawAmbang = body.ambang_saldo;
+  const ambang_saldo =
+    rawAmbang == null || String(rawAmbang).trim() === '' ? 0 : parseAmount(rawAmbang);
   const bank_info = String(body.bank_info || '').trim().slice(0, 200);
-  return { name, saldo_awal, bank_info };
+  return { name, saldo_awal, bank_info, ambang_saldo };
 }
 
 router.post('/books', requireAdmin, async (req, res, next) => {
   try {
-    const { name, saldo_awal, bank_info } = readBookBody(req.body);
+    const { name, saldo_awal, bank_info, ambang_saldo } = readBookBody(req.body);
     if (name.length < 1 || name.length > 100)
       return res.status(400).json({ error: 'Nama buku 1-100 karakter.' });
     if (saldo_awal === null) return res.status(400).json({ error: 'Saldo awal tidak valid.' });
+    if (ambang_saldo === null) return res.status(400).json({ error: 'Ambang saldo tidak valid.' });
     const { rows } = await query(
-      'INSERT INTO books (name, saldo_awal, bank_info, created_by) VALUES ($1, $2, $3, $4) RETURNING id, name, saldo_awal, bank_info',
-      [name, saldo_awal, bank_info, req.session.userId]
+      'INSERT INTO books (name, saldo_awal, bank_info, ambang_saldo, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, saldo_awal, bank_info, ambang_saldo',
+      [name, saldo_awal, bank_info, ambang_saldo, req.session.userId]
     );
     const b = rows[0];
     await audit({ userId: req.user.id, username: req.user.username, action: 'create', entity: 'book', entityId: b.id, detail: name });
     res.status(201).json({
-      book: { id: b.id, name: b.name, saldo_awal: num(b.saldo_awal), bank_info: b.bank_info || '', masuk: 0, keluar: 0, sisa: num(b.saldo_awal) },
+      book: {
+        id: b.id, name: b.name, saldo_awal: num(b.saldo_awal), bank_info: b.bank_info || '',
+        ambang_saldo: num(b.ambang_saldo), masuk: 0, keluar: 0, sisa: num(b.saldo_awal),
+      },
     });
   } catch (e) {
     next(e);
@@ -216,18 +225,24 @@ router.post('/books', requireAdmin, async (req, res, next) => {
 router.patch('/books/:id', requireAdmin, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const { name, saldo_awal, bank_info } = readBookBody(req.body);
+    const { name, saldo_awal, bank_info, ambang_saldo } = readBookBody(req.body);
     if (name.length < 1 || name.length > 100)
       return res.status(400).json({ error: 'Nama buku 1-100 karakter.' });
     if (saldo_awal === null) return res.status(400).json({ error: 'Saldo awal tidak valid.' });
+    if (ambang_saldo === null) return res.status(400).json({ error: 'Ambang saldo tidak valid.' });
     const { rows } = await query(
-      'UPDATE books SET name = $1, saldo_awal = $2, bank_info = $3 WHERE id = $4 AND deleted_at IS NULL RETURNING id, name, saldo_awal, bank_info',
-      [name, saldo_awal, bank_info, id]
+      'UPDATE books SET name = $1, saldo_awal = $2, bank_info = $3, ambang_saldo = $4 WHERE id = $5 AND deleted_at IS NULL RETURNING id, name, saldo_awal, bank_info, ambang_saldo',
+      [name, saldo_awal, bank_info, ambang_saldo, id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Buku tidak ditemukan.' });
     const b = rows[0];
     await audit({ userId: req.user.id, username: req.user.username, action: 'update', entity: 'book', entityId: id, detail: name });
-    res.json({ book: { id: b.id, name: b.name, saldo_awal: num(b.saldo_awal), bank_info: b.bank_info || '' } });
+    res.json({
+      book: {
+        id: b.id, name: b.name, saldo_awal: num(b.saldo_awal), bank_info: b.bank_info || '',
+        ambang_saldo: num(b.ambang_saldo),
+      },
+    });
   } catch (e) {
     next(e);
   }
