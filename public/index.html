@@ -225,41 +225,86 @@
 
         <!-- ===== ANALITIK ===== -->
         <section class="analytics hidden" id="analytics-view" role="tabpanel" aria-labelledby="tab-analitik">
-          <div class="chart-card">
-            <h3>Saldo per Rekening</h3>
-            <div id="rekening-summary" class="rek-summary"></div>
-          </div>
-          <div class="compare-wrap">
-            <h3>Bulan Ini vs Bulan Lalu</h3>
-            <div class="compare" id="compare"></div>
-          </div>
-          <div class="stat-tiles" id="stat-tiles"></div>
-          <div class="chart-card">
-            <div class="chart-head"><h3>Pemasukan vs Pengeluaran per Bulan</h3>
-              <div class="legend"><span class="lg lg-in">Pemasukan</span><span class="lg lg-out">Pengeluaran</span></div>
+          <p class="analytics-empty hidden" id="analytics-empty">Belum ada data untuk dianalisis. Pilih scope lain atau catat transaksi terlebih dahulu.</p>
+
+          <div id="analytics-body" class="analytics-body">
+            <!-- 1. Ringkasan periode -->
+            <div class="ana-block">
+              <header class="ana-block-head">
+                <h3 class="ana-block-title">Ringkasan Periode</h3>
+                <p class="ana-block-sub" id="compare-title">Bulan ini vs bulan lalu</p>
+              </header>
+              <div class="compare" id="compare"></div>
+              <div class="stat-tiles" id="stat-tiles"></div>
             </div>
-            <div class="chart-scroll"><div id="chart-monthly" class="chart"></div></div>
-          </div>
-          <div class="chart-card">
-            <div class="chart-head"><h3>Saldo Berjalan (akumulasi)</h3><div class="legend"><span class="lg lg-bal">Saldo</span></div></div>
-            <div class="chart-scroll"><div id="chart-balance" class="chart"></div></div>
-          </div>
-          <div class="chart-grid">
-            <div class="chart-card"><h3>Pengeluaran per Kategori</h3><div id="breakdown-keluar" class="breakdown"></div></div>
-            <div class="chart-card"><h3>Pemasukan per Kategori</h3><div id="breakdown-masuk" class="breakdown"></div></div>
-          </div>
-          <div class="chart-card tax-card">
-            <div class="chart-head">
-              <h3>Ringkasan Pajak (Perkiraan)</h3>
-              <label class="field-inline">
-                <span>Bulan</span>
-                <input id="tax-month" type="month" />
-              </label>
+
+            <!-- 2. Posisi rekening -->
+            <div class="ana-block">
+              <header class="ana-block-head">
+                <h3 class="ana-block-title">Posisi Rekening</h3>
+                <p class="ana-block-sub">Saldo hidup per rekening (semua periode)</p>
+              </header>
+              <div id="rekening-summary" class="rek-summary"></div>
             </div>
-            <p class="muted tax-disclaimer">Perkiraan internal berdasarkan data transaksi — <strong>bukan e-filing</strong>. Sesuaikan dengan konsultan pajak Anda.</p>
-            <div id="tax-summary" class="tax-summary"></div>
+
+            <!-- 3. Tren -->
+            <div class="ana-block">
+              <header class="ana-block-head">
+                <h3 class="ana-block-title">Tren</h3>
+                <p class="ana-block-sub">Arus kas dan saldo akumulasi per bulan</p>
+              </header>
+              <div class="ana-charts">
+                <div class="ana-chart">
+                  <div class="chart-head">
+                    <h4>Pemasukan vs Pengeluaran</h4>
+                    <div class="legend"><span class="lg lg-in">Masuk</span><span class="lg lg-out">Keluar</span></div>
+                  </div>
+                  <div class="chart-scroll"><div id="chart-monthly" class="chart"></div></div>
+                </div>
+                <div class="ana-chart">
+                  <div class="chart-head">
+                    <h4>Saldo Berjalan</h4>
+                    <div class="legend"><span class="lg lg-bal">Saldo</span></div>
+                  </div>
+                  <div class="chart-scroll"><div id="chart-balance" class="chart"></div></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 4. Komposisi kategori -->
+            <div class="ana-block">
+              <header class="ana-block-head">
+                <h3 class="ana-block-title">Komposisi Kategori</h3>
+                <p class="ana-block-sub">Proporsi sepanjang seluruh periode scope</p>
+              </header>
+              <div class="chart-grid">
+                <div class="ana-panel">
+                  <h4>Pengeluaran</h4>
+                  <div id="breakdown-keluar" class="breakdown"></div>
+                </div>
+                <div class="ana-panel">
+                  <h4>Pemasukan</h4>
+                  <div id="breakdown-masuk" class="breakdown"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 5. Pajak -->
+            <div class="ana-block tax-card">
+              <header class="ana-block-head">
+                <div>
+                  <h3 class="ana-block-title">Ringkasan Pajak</h3>
+                  <p class="ana-block-sub">Perkiraan internal — bukan e-filing</p>
+                </div>
+                <label class="field-inline">
+                  <span>Bulan</span>
+                  <input id="tax-month" type="month" />
+                </label>
+              </header>
+              <p class="muted tax-disclaimer">Dihitung dari transaksi scope terpilih. Sesuaikan dengan konsultan pajak Anda.</p>
+              <div id="tax-summary" class="tax-summary"></div>
+            </div>
           </div>
-          <p class="analytics-empty hidden" id="analytics-empty">Belum ada data untuk dianalisis.</p>
         </section>
       </main>
 

@@ -597,6 +597,11 @@ function setView(view) {
   $('tools-catatan').classList.toggle('hidden', view !== 'catatan');
   $('tools-besar').classList.toggle('hidden', view !== 'besar');
   $('tools-analitik').classList.toggle('hidden', view !== 'analitik');
+  // Analitik punya ringkasannya sendiri — sembunyikan beranda & kartu Catatan agar tidak bentrok.
+  const home = $('home-dash');
+  const cards = document.querySelector('.cards');
+  if (home) home.classList.toggle('hidden', view === 'analitik');
+  if (cards) cards.classList.toggle('hidden', view === 'analitik');
   const swipeHint = document.querySelector('.ledger-swipe-hint');
   if (swipeHint) swipeHint.classList.toggle('hidden', view !== 'catatan');
   render();
@@ -1488,18 +1493,21 @@ function renderAnalytics() {
   refreshChartColors();
   const has = anaTx().length > 0;
   $('analytics-empty').classList.toggle('hidden', has);
-  const ids = ['compare', 'rekening-summary', 'stat-tiles', 'chart-monthly', 'chart-balance', 'breakdown-keluar', 'breakdown-masuk'];
-  if (!has) ids.forEach((id) => { if ($(id)) $(id).innerHTML = ''; });
-  else {
-    const months = monthlyAgg();
-    renderCompare();
-    renderRekeningSummary();
-    renderTiles(months);
-    renderMonthlyChart(months);
-    renderBalanceChart(months);
-    renderBreakdown('keluar', $('breakdown-keluar'));
-    renderBreakdown('masuk', $('breakdown-masuk'));
+  const body = $('analytics-body');
+  if (body) body.classList.toggle('hidden', !has);
+  if (!has) {
+    ['compare', 'rekening-summary', 'stat-tiles', 'chart-monthly', 'chart-balance', 'breakdown-keluar', 'breakdown-masuk', 'tax-summary']
+      .forEach((id) => { if ($(id)) $(id).innerHTML = ''; });
+    return;
   }
+  const months = monthlyAgg();
+  renderCompare();
+  renderRekeningSummary();
+  renderTiles(months);
+  renderMonthlyChart(months);
+  renderBalanceChart(months);
+  renderBreakdown('keluar', $('breakdown-keluar'));
+  renderBreakdown('masuk', $('breakdown-masuk'));
   ensureTaxMonth();
   renderTaxSummary();
 }
@@ -1584,8 +1592,8 @@ function renderCompare() {
     { label: 'Pengeluaran', now: a.keluar, prev: b.keluar, goodUp: false },
     { label: 'Selisih (Net)', now: a.masuk - a.keluar, prev: b.masuk - b.keluar, goodUp: true },
   ];
-  const title = document.querySelector('.compare-wrap h3');
-  if (title) title.textContent = `Bulan Ini (${labelBulan(now)}) vs Bulan Lalu (${labelBulan(prev)})`;
+  const title = $('compare-title');
+  if (title) title.textContent = `${labelBulan(now)} vs ${labelBulan(prev)}`;
   $('compare').innerHTML = items.map((it) => {
     const diff = it.now - it.prev;
     const pct = it.prev !== 0 ? Math.round((diff / Math.abs(it.prev)) * 100) : (it.now !== 0 ? 100 : 0);
@@ -1619,7 +1627,7 @@ function renderMonthlyChart(months) {
   const W = Math.round(padL + padR + groupW * months.length);
   const max = Math.max(1, ...months.map((m) => Math.max(m.masuk, m.keluar)));
   const y = (v) => padT + plotH * (1 - v / max);
-  let svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" role="img" aria-label="Grafik pemasukan dan pengeluaran per bulan">`;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Grafik pemasukan dan pengeluaran per bulan">`;
   for (let i = 0; i <= 4; i++) {
     const val = (max / 4) * i, yy = y(val);
     svg += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W - padR}" y2="${yy.toFixed(1)}" stroke="${C_GRID}" />`;
@@ -1645,7 +1653,7 @@ function renderBalanceChart(months) {
   const x = (i) => (pts.length > 1 ? padL + step * i : padL + innerW / 2);
   const y = (v) => padT + plotH * (1 - (v - minV) / range);
   const y0 = y(0);
-  let svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" role="img" aria-label="Grafik saldo berjalan">`;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Grafik saldo berjalan">`;
   svg += `<line x1="${padL}" y1="${y0.toFixed(1)}" x2="${W - padR}" y2="${y0.toFixed(1)}" stroke="${C_GRID}" stroke-dasharray="4 4" />`;
   svg += `<text x="${padL - 8}" y="${(y0 + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="${C_AXIS}">Rp0</text>`;
   svg += `<text x="${padL - 8}" y="${(y(maxV) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="${C_AXIS}">${singkatRp(maxV)}</text>`;
