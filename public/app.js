@@ -101,7 +101,7 @@ const state = {
   view: 'catatan', // 'catatan' | 'besar' | 'analitik'
 };
 
-// ---------- Tema (gelap default = "cyber", terang opsional) ----------
+// ---------- Tema (gelap default; terang opsional) ----------
 function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
   const btn = $('theme-btn');
@@ -356,15 +356,58 @@ function render() {
   // Analitik ikut scope (gabungan / rekening tertentu); tampilan lain ikut rekening terpilih.
   const scopeTx = analitik ? anaTx() : state.transactions;
   const scopeSaldoAwal = analitik ? anaSaldoAwal() : (book ? book.saldo_awal : 0);
-  // Kartu ringkasan pada view Catatan mengikuti filter aktif (bulan/kategori/cari) agar
-  // konsisten dengan daftar & footer yang ditampilkan; view lain memakai seluruh scope.
+
+  // Kartu masuk/keluar pada Catatan mengikuti filter (bulan/kategori/cari); view lain = seluruh scope.
   const cardTx = state.view === 'catatan' ? visibleTx() : scopeTx;
   const totalMasuk = cardTx.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
   const totalKeluar = cardTx.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
 
+  // Saldo kartu: jangan pernah pakai saldo_awal + total terfilter (salah secara akuntansi).
+  // - Catatan + filter bulan saja → saldo akhir periode (computeLedger)
+  // - Catatan + kategori/cari → tampilkan saldo rekening penuh (bukan "saldo filter")
+  // - Selain itu → saldo rekening / scope penuh
+  const filterBits = [];
+  if (state.view === 'catatan') {
+    if (state.month) filterBits.push(labelBulan(state.month));
+    if (state.kategori) filterBits.push('kategori ' + state.kategori);
+    if (state.search.trim()) filterBits.push('pencarian');
+  }
+  const hasSoftFilter = !!(state.kategori || state.search.trim());
+  let saldoCard;
+  let lblSisa = 'Saldo Rekening';
+  let lblMasuk = 'Total Pemasukan';
+  let lblKeluar = 'Total Pengeluaran';
+  let caption = '';
+
+  if (state.view === 'catatan' && state.month && !hasSoftFilter) {
+    const L = computeLedger(state.transactions, book ? book.saldo_awal : 0, `${state.month}-01`, `${state.month}-31`);
+    saldoCard = L.saldoAkhir;
+    lblSisa = 'Saldo per ' + labelBulan(state.month);
+    lblMasuk = 'Pemasukan bulan';
+    lblKeluar = 'Pengeluaran bulan';
+    caption = 'Kartu mengikuti filter bulan. Saldo dihitung dengan pembuka periode (sama seperti Buku Besar).';
+  } else if (state.view === 'catatan' && filterBits.length) {
+    saldoCard = bookSisa(book);
+    lblSisa = 'Saldo Rekening';
+    lblMasuk = 'Pemasukan (filter)';
+    lblKeluar = 'Pengeluaran (filter)';
+    caption = 'Masuk/keluar mengikuti filter (' + filterBits.join(', ') + '). Saldo Rekening = saldo penuh, tidak terpotong filter.';
+  } else {
+    saldoCard = analitik
+      ? scopeSaldoAwal + totalMasuk - totalKeluar
+      : bookSisa(book);
+    lblSisa = analitik ? 'Saldo Scope' : 'Saldo Rekening';
+    caption = '';
+  }
+
   $('sum-masuk').textContent = rupiah(totalMasuk);
   $('sum-keluar').textContent = rupiah(totalKeluar);
-  $('sum-sisa').textContent = rupiah(scopeSaldoAwal + totalMasuk - totalKeluar);
+  $('sum-sisa').textContent = rupiah(saldoCard);
+  const elLblM = $('lbl-masuk'), elLblK = $('lbl-keluar'), elLblS = $('lbl-sisa'), elCap = $('cards-caption');
+  if (elLblM) elLblM.textContent = lblMasuk;
+  if (elLblK) elLblK.textContent = lblKeluar;
+  if (elLblS) elLblS.textContent = lblSisa;
+  if (elCap) elCap.textContent = caption;
 
   const scopeBook = analitik && anaScopeId() ? state.books.find((b) => b.id === anaScopeId()) : null;
   renderBookInfo({ analitik, book, scopeBook, saldoAwal: scopeSaldoAwal, txCount: scopeTx.length });
@@ -378,6 +421,15 @@ function render() {
 
   if (state.view === 'besar') renderBukuBesar();
   if (state.view === 'analitik') renderAnalytics();
+}
+
+/** Saldo rekening dari saldo awal + seluruh transaksi (sumber kebenaran UI). */
+function bookSisa(book) {
+  if (!book) return 0;
+  const tx = state.allTransactions.filter((t) => t.book_id === book.id);
+  const masuk = tx.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
+  const keluar = tx.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
+  return (book.saldo_awal || 0) + masuk - keluar;
 }
 
 /** Ringkasan beranda: selalu bulan kalender berjalan (tidak ikut filter Catatan). */
@@ -414,15 +466,17 @@ function renderHomeDash() {
   }).join('');
 }
 
-/** Banner peringatan bila saldo rekening di bawah ambang yang diset. */
+/** Banner peringatan bila saldo rekening di bawah ambang — dihitung ulang dari transaksi. */
 function renderLowBalanceAlert() {
   const el = $('low-balance-alert');
   if (!el) return;
-  const low = state.books.filter((b) => (b.ambang_saldo || 0) > 0 && (b.sisa ?? 0) < b.ambang_saldo);
+  const low = state.books
+    .map((b) => ({ ...b, sisaLive: bookSisa(b) }))
+    .filter((b) => (b.ambang_saldo || 0) > 0 && b.sisaLive < b.ambang_saldo);
   if (!low.length) { el.classList.add('hidden'); el.innerHTML = ''; return; }
   el.classList.remove('hidden');
   el.innerHTML = `<strong>Saldo rendah</strong>` + low.map((b) =>
-    `<div class="alert-item">${escapeHtml(b.name)}: saldo ${rupiah(b.sisa)} (ambang ${rupiah(b.ambang_saldo)})</div>`
+    `<div class="alert-item">${escapeHtml(b.name)}: saldo ${rupiah(b.sisaLive)} (ambang ${rupiah(b.ambang_saldo)})</div>`
   ).join('');
 }
 
@@ -450,7 +504,9 @@ function renderColumn(type, list) {
   tbody.innerHTML = '';
   if (list.length === 0) {
     const emptyMsg = state.month
-      ? `Belum ada data di ${labelBulan(state.month)} — klik + untuk menambah`
+      ? (isAdmin()
+        ? `Belum ada data di ${labelBulan(state.month)} — klik + untuk menambah`
+        : `Belum ada data di ${labelBulan(state.month)}`)
       : 'Belum ada data';
     tbody.innerHTML = `<tr class="empty-row"><td colspan="5">${emptyMsg}</td></tr>`;
   } else {
@@ -1374,8 +1430,8 @@ function wireStaticHandlers() {
     if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
     if (modalOpen) return;
     if ($('app-view').classList.contains('hidden')) return;
-    if (e.key === 'n' || e.key === 'N') { e.preventDefault(); openTxModal('masuk'); }
-    else if (e.key === 'k' || e.key === 'K') { e.preventDefault(); openTxModal('keluar'); }
+    if (e.key === 'n' || e.key === 'N') { if (!isAdmin()) return; e.preventDefault(); openTxModal('masuk'); }
+    else if (e.key === 'k' || e.key === 'K') { if (!isAdmin()) return; e.preventDefault(); openTxModal('keluar'); }
     else if (e.key === '/' && state.view === 'catatan') { e.preventDefault(); $('search-input').focus(); }
   });
 }

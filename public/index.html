@@ -82,10 +82,13 @@
         <!-- Alert saldo rendah -->
         <section id="low-balance-alert" class="alert-banner hidden" role="status" aria-live="polite"></section>
 
-        <!-- Ringkasan beranda (bulan berjalan, tanpa filter) -->
-        <section class="home-dash" id="home-dash" aria-label="Ringkasan bulan ini">
+        <!-- Ringkasan beranda (bulan kalender berjalan — tidak ikut filter Catatan) -->
+        <section class="home-dash" id="home-dash" aria-label="Arus kas bulan ini">
           <div class="home-dash-head">
-            <h2 class="home-dash-title">Bulan Ini</h2>
+            <div>
+              <h2 class="home-dash-title">Arus Kas Bulan Ini</h2>
+              <p class="home-dash-note">Tidak mengikuti filter Catatan di bawah</p>
+            </div>
             <span class="home-dash-month" id="home-month-label"></span>
           </div>
           <div class="home-dash-stats">
@@ -98,7 +101,7 @@
               <span class="home-stat-value" id="home-keluar">Rp0</span>
             </div>
             <div class="home-stat home-stat-net">
-              <span class="home-stat-label">Sisa bulan</span>
+              <span class="home-stat-label">Net (masuk − keluar)</span>
               <span class="home-stat-value" id="home-sisa">Rp0</span>
             </div>
           </div>
@@ -111,18 +114,19 @@
         <!-- Info buku -->
         <section class="book-info" id="book-info"></section>
 
-        <!-- Ringkasan -->
-        <section class="cards">
+        <!-- Ringkasan (mengikuti filter Catatan bila aktif) -->
+        <section class="cards" aria-label="Ringkasan tampilan">
+          <p class="cards-caption muted" id="cards-caption"></p>
           <div class="card card-in tick">
-            <span class="card-label">Total Pemasukan</span>
+            <span class="card-label" id="lbl-masuk">Total Pemasukan</span>
             <span class="card-value" id="sum-masuk">Rp0</span>
           </div>
           <div class="card card-out tick">
-            <span class="card-label">Total Pengeluaran</span>
+            <span class="card-label" id="lbl-keluar">Total Pengeluaran</span>
             <span class="card-value" id="sum-keluar">Rp0</span>
           </div>
           <div class="card card-balance tick">
-            <span class="card-label">Saldo Akhir</span>
+            <span class="card-label" id="lbl-sisa">Saldo Rekening</span>
             <span class="card-value" id="sum-sisa">Rp0</span>
           </div>
         </section>
