@@ -97,31 +97,62 @@ const state = {
   besarFrom: '',
   besarTo: '',
   anaScope: '',    // '' = gabungan semua rekening; atau id rekening tertentu
+  anaRange: '12',  // '12' | '6' | 'all' | 'custom'
+  anaFrom: '',     // YYYY-MM (custom / dihitung)
+  anaTo: '',       // YYYY-MM
   taxMonth: '',    // YYYY-MM untuk ringkasan pajak
   view: 'catatan', // 'catatan' | 'besar' | 'analitik'
 };
 
-// ---------- Tema (gelap default; terang opsional) ----------
+// ---------- Tema / densitas / profil cetak ----------
 function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
   const btn = $('theme-btn');
-  if (btn) btn.textContent = t === 'light' ? '☀️' : '🌙';
+  if (btn) btn.textContent = t === 'light' ? 'Tema gelap' : 'Tema terang';
   try { localStorage.setItem('sintesa_theme', t); } catch (_) {}
 }
 function initTheme() { applyTheme(localStorage.getItem('sintesa_theme') === 'light' ? 'light' : 'dark'); }
 function toggleTheme() {
   applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
-  // Grafik memakai warna dari variabel tema (via JS) — render ulang agar ikut berubah.
   if (state.user && state.view === 'analitik') renderAnalytics();
 }
-function startClock() {
-  const tick = () => {
-    const el = $('sr-clock');
-    if (el) el.textContent = new Date().toLocaleTimeString('id-ID', { hour12: false });
-  };
-  tick();
-  setInterval(tick, 1000);
+
+function applyDensity(compact) {
+  document.body.classList.toggle('density-compact', !!compact);
+  const btn = $('density-btn');
+  if (btn) btn.textContent = compact ? 'Tabel longgar' : 'Tabel rapat';
+  try { localStorage.setItem('sintesa_density', compact ? 'compact' : 'comfy'); } catch (_) {}
 }
+function initDensity() { applyDensity(localStorage.getItem('sintesa_density') === 'compact'); }
+function toggleDensity() { applyDensity(!document.body.classList.contains('density-compact')); }
+
+const COMPANY_DEFAULT = { name: 'PT Sintesa Data Semesta', address: '', npwp: '' };
+function loadCompany() {
+  try {
+    const raw = localStorage.getItem('sintesa_company');
+    if (!raw) return { ...COMPANY_DEFAULT };
+    const o = JSON.parse(raw);
+    return {
+      name: (o.name || COMPANY_DEFAULT.name).trim() || COMPANY_DEFAULT.name,
+      address: String(o.address || '').trim(),
+      npwp: String(o.npwp || '').trim(),
+    };
+  } catch (_) { return { ...COMPANY_DEFAULT }; }
+}
+function saveCompany(data) {
+  try { localStorage.setItem('sintesa_company', JSON.stringify(data)); } catch (_) {}
+}
+function openCompanyModal() {
+  lastFocused = document.activeElement;
+  const c = loadCompany();
+  const f = $('company-form');
+  f.name.value = c.name;
+  f.address.value = c.address;
+  f.npwp.value = c.npwp;
+  $('company-modal').classList.remove('hidden');
+  f.name.focus();
+}
+
 const curBook = () => state.books.find((b) => b.id === state.bookId) || null;
 
 // ============================================================
@@ -130,7 +161,7 @@ const curBook = () => state.books.find((b) => b.id === state.bookId) || null;
 async function boot() {
   $('year').textContent = new Date().getFullYear();
   initTheme();
-  startClock();
+  initDensity();
   wireStaticHandlers();
   const retryBtn = $('boot-retry');
   if (retryBtn) retryBtn.addEventListener('click', bootStatus);
@@ -192,7 +223,7 @@ async function enterApp() {
   $('auth-view').classList.add('hidden');
   $('app-view').classList.remove('hidden');
   $('menu-user').textContent = 'Masuk sebagai ' + state.user.name + (isAdmin() ? '' : ' (viewer)');
-  $('sr-user').textContent = state.user.name.toUpperCase();
+  $('sr-user').textContent = state.user.name;
   applyRole();
   await loadBooks();
 }
@@ -409,6 +440,13 @@ function render() {
   if (elLblS) elLblS.textContent = lblSisa;
   if (elCap) elCap.textContent = caption;
 
+  // Kartu ringkasan hanya saat Catatan + ada filter (hindari tumpukan dengan home-dash).
+  const cards = $('filter-cards');
+  if (cards) {
+    const showCards = state.view === 'catatan' && filterBits.length > 0;
+    cards.classList.toggle('hidden', !showCards);
+  }
+
   const scopeBook = analitik && anaScopeId() ? state.books.find((b) => b.id === anaScopeId()) : null;
   renderBookInfo({ analitik, book, scopeBook, saldoAwal: scopeSaldoAwal, txCount: scopeTx.length });
 
@@ -483,11 +521,11 @@ function renderLowBalanceAlert() {
 function renderBookInfo({ analitik, book, scopeBook, saldoAwal, txCount }) {
   const parts = [];
   if (analitik && !scopeBook) {
-    parts.push(`<span class="bi-name">📊 Gabungan Semua Rekening</span>`);
+    parts.push(`<span class="bi-name">Gabungan Semua Rekening</span>`);
     parts.push(`<span class="bi-item"><b>${state.books.length}</b> rekening</span>`);
     parts.push(`<span class="bi-item">Saldo Awal gabungan: <b>${rupiah(saldoAwal)}</b></span>`);
   } else if (analitik && scopeBook) {
-    parts.push(`<span class="bi-name">📊 Analitik: ${escapeHtml(scopeBook.name)}</span>`);
+    parts.push(`<span class="bi-name">Analitik: ${escapeHtml(scopeBook.name)}</span>`);
     parts.push(`<span class="bi-item">Saldo Awal: <b>${rupiah(saldoAwal)}</b></span>`);
     if (scopeBook.bank_info) parts.push(`<span class="bi-item">No. Rekening: <b>${escapeHtml(scopeBook.bank_info)}</b></span>`);
   } else {
@@ -503,12 +541,13 @@ function renderColumn(type, list) {
   const tbody = $('tbody-' + type);
   tbody.innerHTML = '';
   if (list.length === 0) {
+    const cta = isAdmin()
+      ? ` <button type="button" class="btn btn-${type === 'masuk' ? 'in' : 'out'} btn-sm empty-cta" data-add="${type}">＋ Tambah ${type === 'masuk' ? 'pemasukan' : 'pengeluaran'}</button>`
+      : '';
     const emptyMsg = state.month
-      ? (isAdmin()
-        ? `Belum ada data di ${labelBulan(state.month)} — klik + untuk menambah`
-        : `Belum ada data di ${labelBulan(state.month)}`)
-      : 'Belum ada data';
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="5">${emptyMsg}</td></tr>`;
+      ? `Belum ada data di ${labelBulan(state.month)}.`
+      : 'Belum ada data.';
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="5">${emptyMsg}${cta}</td></tr>`;
   } else {
     list.forEach((t, i) => {
       const tr = document.createElement('tr');
@@ -516,10 +555,10 @@ function renderColumn(type, list) {
         <td class="c-no">${i + 1}</td>
         <td class="c-date">${tanggalIndo(t.tanggal)}</td>
         <td class="c-amt">${rupiah(t.jumlah)}</td>
-        <td>${escapeHtml(t.keterangan) || '<span class="muted">—</span>'}${t.kategori ? ` <span class="muted">· ${escapeHtml(t.kategori)}</span>` : ''}${t.has_bukti ? ` <button type="button" class="bukti-chip" data-bukti="${t.id}" title="Lihat bukti">📎 bukti</button>` : ''}</td>
+        <td>${escapeHtml(t.keterangan) || '<span class="muted">—</span>'}${t.kategori ? ` <span class="muted">· ${escapeHtml(t.kategori)}</span>` : ''}${t.has_bukti ? ` <button type="button" class="bukti-chip" data-bukti="${t.id}" title="Lihat bukti">bukti</button>` : ''}</td>
         <td class="c-act"><div class="row-actions">${isAdmin() ? `
-          <button class="icon-btn" title="Ubah" aria-label="Ubah transaksi ${tanggalIndo(t.tanggal)} ${rupiah(t.jumlah)}" data-edit="${t.id}">✎</button>
-          <button class="icon-btn" title="Hapus" aria-label="Hapus transaksi ${tanggalIndo(t.tanggal)} ${rupiah(t.jumlah)}" data-del="${t.id}">🗑</button>` : ''}
+          <button class="icon-btn" title="Ubah" aria-label="Ubah transaksi ${tanggalIndo(t.tanggal)} ${rupiah(t.jumlah)}" data-edit="${t.id}">Ubah</button>
+          <button class="icon-btn" title="Hapus" aria-label="Hapus transaksi ${tanggalIndo(t.tanggal)} ${rupiah(t.jumlah)}" data-del="${t.id}">Hapus</button>` : ''}
         </div></td>`;
       tbody.appendChild(tr);
     });
@@ -565,7 +604,7 @@ function renderBukuBesar() {
   } else {
     d.rows.forEach((r, i) => {
       const ket = escapeHtml(r.keterangan) + (r.kategori ? ` <span class="muted">· ${escapeHtml(r.kategori)}</span>` : '')
-        + (r.has_bukti ? ` <button type="button" class="bukti-chip" data-bukti="${r.id}" title="Lihat bukti">📎</button>` : '');
+        + (r.has_bukti ? ` <button type="button" class="bukti-chip" data-bukti="${r.id}" title="Lihat bukti">bukti</button>` : '');
       html += `<tr>
         <td class="c-no">${i + 1}</td>
         <td class="c-date">${tanggalIndo(r.tanggal)}</td>
@@ -591,17 +630,27 @@ function setView(view) {
     b.classList.toggle('active', on);
     b.setAttribute('aria-selected', on ? 'true' : 'false');
   });
-  $('ledger-view').classList.toggle('hidden', view !== 'catatan');
-  $('besar-view').classList.toggle('hidden', view !== 'besar');
-  $('analytics-view').classList.toggle('hidden', view !== 'analitik');
+  const panels = [
+    ['ledger-view', 'catatan'],
+    ['besar-view', 'besar'],
+    ['analytics-view', 'analitik'],
+  ];
+  panels.forEach(([id, v]) => {
+    const el = $(id);
+    const show = view === v;
+    el.classList.toggle('hidden', !show);
+    if (show) {
+      el.classList.remove('view-enter');
+      void el.offsetWidth;
+      el.classList.add('view-enter');
+    }
+  });
   $('tools-catatan').classList.toggle('hidden', view !== 'catatan');
   $('tools-besar').classList.toggle('hidden', view !== 'besar');
   $('tools-analitik').classList.toggle('hidden', view !== 'analitik');
-  // Analitik punya ringkasannya sendiri — sembunyikan beranda & kartu Catatan agar tidak bentrok.
+  // Analitik punya ringkasannya sendiri — sembunyikan beranda.
   const home = $('home-dash');
-  const cards = document.querySelector('.cards');
   if (home) home.classList.toggle('hidden', view === 'analitik');
-  if (cards) cards.classList.toggle('hidden', view === 'analitik');
   const swipeHint = document.querySelector('.ledger-swipe-hint');
   if (swipeHint) swipeHint.classList.toggle('hidden', view !== 'catatan');
   render();
@@ -1071,14 +1120,13 @@ function exportCsv() {
 // ============================================================
 function buildPrintReport() {
   const analitik = state.view === 'analitik';
+  const company = loadCompany();
   const scopeBook = analitik ? (anaScopeId() ? state.books.find((b) => b.id === anaScopeId()) : null) : curBook();
-  const scopeTx = analitik ? anaTx() : state.transactions;
-  const saldoAwal = analitik ? anaSaldoAwal() : (scopeBook ? scopeBook.saldo_awal : 0);
+  const scopeTx = analitik ? anaTxInRange() : state.transactions;
+  const saldoAwal = analitik ? anaSaldoAwalForRange() : (scopeBook ? scopeBook.saldo_awal : 0);
   const scopeName = analitik && !scopeBook ? 'Gabungan Semua Rekening' : (scopeBook ? scopeBook.name : '—');
   const bankInfo = scopeBook ? (scopeBook.bank_info || '') : '';
 
-  // Periode mengikuti filter view yang sedang dilihat: Buku Besar = rentang tanggal,
-  // Catatan = bulan terpilih, Analitik = seluruh periode.
   let from = '', to = '', periodLabel = 'Seluruh periode';
   if (state.view === 'besar' && (state.besarFrom || state.besarTo)) {
     from = state.besarFrom; to = state.besarTo;
@@ -1086,11 +1134,14 @@ function buildPrintReport() {
   } else if (state.view === 'catatan' && state.month) {
     from = `${state.month}-01`; to = `${state.month}-31`;
     periodLabel = labelBulan(state.month);
+  } else if (analitik) {
+    const { fromYm, toYm } = resolveAnaRange();
+    if (fromYm && toYm) {
+      from = `${fromYm}-01`; to = `${toYm}-31`;
+      periodLabel = fromYm === toYm ? labelBulan(fromYm) : `${labelBulan(fromYm)} — ${labelBulan(toYm)}`;
+    }
   }
 
-  // Laporan cetak adalah ledger periode penuh (kolom saldo berjalan harus utuh), sehingga
-  // filter layar kategori/pencarian TIDAK diterapkan. Bila aktif, beri catatan agar dokumen
-  // tak disalahartikan sebagai laporan terfilter.
   let filterNote = '';
   if (state.view === 'catatan') {
     const fl = [];
@@ -1104,7 +1155,6 @@ function buildPrintReport() {
   const cetakTgl = tanggalIndo(todayISO());
   const docNo = `SDS/LK/${todayISO().replace(/-/g, '')}`;
 
-  // Rekap per kategori (dalam periode).
   const breakdown = (type) => {
     const m = new Map();
     for (const r of L.rows) if (r.type === type) {
@@ -1120,7 +1170,6 @@ function buildPrintReport() {
       `<tr class="total"><td>TOTAL</td><td class="num">${rupiah(bd.tot)}</td><td class="num">100%</td></tr>`
     : `<tr><td colspan="3" style="color:#666;font-style:italic">Tidak ada</td></tr>`;
 
-  // Analisis pengeluaran otomatis — 1 paragraf, dihitung dari data periode.
   const analisisPengeluaran = () => {
     const tK = L.tKeluar, tM = L.tMasuk;
     const nK = L.rows.filter((r) => r.type === 'keluar').length;
@@ -1150,30 +1199,17 @@ function buildPrintReport() {
     return s + ' ' + nilai;
   };
 
-  // Baris ledger.
-  const openLabel = from ? `Saldo awal per ${tanggalIndo(from)}` : 'SALDO AWAL';
-  let ledgerBody = `<tr class="opening"><td class="c-no"></td><td>—</td><td colspan="2">${openLabel}</td><td class="num"></td><td class="num"></td><td class="num">${rupiah(L.opening)}</td></tr>`;
-  if (L.rows.length === 0) {
-    ledgerBody += `<tr><td colspan="7" class="pr-empty">Tidak ada transaksi pada periode ini.</td></tr>`;
-  } else {
-    ledgerBody += L.rows.map((r, i) => `<tr>
-      <td class="c-no">${i + 1}</td>
-      <td>${tanggalIndo(r.tanggal)}</td>
-      <td>${escapeHtml(r.keterangan) || '—'}</td>
-      <td>${escapeHtml(r.kategori) || '—'}</td>
-      <td class="num r-in">${r.type === 'masuk' ? rupiah(r.jumlah) : ''}</td>
-      <td class="num r-out">${r.type === 'keluar' ? rupiah(r.jumlah) : ''}</td>
-      <td class="num">${rupiah(r.saldo)}</td></tr>`).join('');
-  }
-
-  const html = `
+  const coAddr = company.address ? `<div class="pr-co-addr">${escapeHtml(company.address)}</div>` : '';
+  const coNpwp = company.npwp ? `<div class="pr-co-npwp">NPWP: ${escapeHtml(company.npwp)}</div>` : '';
+  const kop = `
     <div class="pr-watermark" aria-hidden="true"><span>RAHASIA</span></div>
     <header class="pr-head">
       <div class="pr-brand">
-        <img class="pr-mark" src="/logo.svg" alt="Logo PT Sintesa Data Semesta" width="44" height="44" />
+        <img class="pr-mark" src="/logo.svg" alt="Logo" width="44" height="44" />
         <div>
-          <div class="pr-co-name">PT SINTESA DATA SEMESTA</div>
+          <div class="pr-co-name">${escapeHtml(company.name || 'PT SINTESA DATA SEMESTA').toUpperCase()}</div>
           <div class="pr-co-sub">Sistem Pencatatan Keuangan</div>
+          ${coAddr}${coNpwp}
         </div>
       </div>
       <div class="pr-docmeta">
@@ -1181,10 +1217,8 @@ function buildPrintReport() {
         <div>Tanggal Cetak: <b>${cetakTgl}</b></div>
       </div>
     </header>
-
     <div class="pr-title">Laporan ${jenis}</div>
     <div class="pr-subtitle">${escapeHtml(scopeName)}</div>
-
     <table class="pr-meta"><tbody>
       <tr><td class="k">Rekening</td><td class="v">: ${escapeHtml(scopeName)}</td></tr>
       ${bankInfo ? `<tr><td class="k">No. Rekening / Bank</td><td class="v">: ${escapeHtml(bankInfo)}</td></tr>` : ''}
@@ -1192,44 +1226,14 @@ function buildPrintReport() {
       <tr><td class="k">Jumlah Transaksi</td><td class="v">: ${L.rows.length}</td></tr>
       ${filterNote ? `<tr><td class="k">Catatan</td><td class="v">: ${escapeHtml(filterNote)}</td></tr>` : ''}
     </tbody></table>
-
     <section class="pr-summary">
       <div class="pr-sum-box"><div class="lbl">Saldo Awal</div><div class="val">${rupiah(L.opening)}</div></div>
       <div class="pr-sum-box pos"><div class="lbl">Total Pemasukan</div><div class="val">${rupiah(L.tMasuk)}</div></div>
       <div class="pr-sum-box neg"><div class="lbl">Total Pengeluaran</div><div class="val">${rupiah(L.tKeluar)}</div></div>
       <div class="pr-sum-box saldo"><div class="lbl">Saldo Akhir</div><div class="val">${rupiah(L.saldoAkhir)}</div></div>
-    </section>
+    </section>`;
 
-    <table class="pr-ledger">
-      <thead><tr>
-        <th class="c-no">No</th><th>Tanggal</th><th>Keterangan</th><th>Kategori</th>
-        <th class="num">Pemasukan</th><th class="num">Pengeluaran</th><th class="num">Saldo</th>
-      </tr></thead>
-      <tbody>${ledgerBody}</tbody>
-      <tfoot><tr>
-        <td colspan="4">TOTAL</td>
-        <td class="num">${rupiah(L.tMasuk)}</td>
-        <td class="num">${rupiah(L.tKeluar)}</td>
-        <td class="num">${rupiah(L.saldoAkhir)}</td>
-      </tr></tfoot>
-    </table>
-
-    <section class="pr-breakdown">
-      <div class="pr-bd">
-        <h4>Rekap Pemasukan per Kategori</h4>
-        <table class="pr-bd-table"><tbody>${bdRows(bdIn)}</tbody></table>
-      </div>
-      <div class="pr-bd">
-        <h4>Rekap Pengeluaran per Kategori</h4>
-        <table class="pr-bd-table"><tbody>${bdRows(bdOut)}</tbody></table>
-      </div>
-    </section>
-
-    <section class="pr-analisis">
-      <h4>Analisis Pengeluaran</h4>
-      <p class="pr-analisis-body">${analisisPengeluaran()}</p>
-    </section>
-
+  const sign = `
     <section class="pr-sign">
       <div class="pr-place">………………………, ${cetakTgl}</div>
       <div class="pr-sign-cols">
@@ -1245,10 +1249,69 @@ function buildPrintReport() {
         </div>
       </div>
     </section>
+    <div class="pr-pagefoot">${docNo} · ${escapeHtml(company.name)} — Sistem Pencatatan Keuangan · Dicetak ${cetakTgl}</div>`;
 
-    <div class="pr-pagefoot">${docNo} · PT Sintesa Data Semesta — Sistem Pencatatan Keuangan · Dicetak ${cetakTgl}</div>`;
+  if (analitik) {
+    const chartM = ($('chart-monthly') && $('chart-monthly').innerHTML) || '';
+    const chartB = ($('chart-balance') && $('chart-balance').innerHTML) || '';
+    const rekRows = state.books.map((b) => {
+      const sisa = bookSisa(b);
+      const low = (b.ambang_saldo || 0) > 0 && sisa < b.ambang_saldo;
+      return `<tr class="${low ? 'low' : ''}"><td>${escapeHtml(b.name)}</td><td class="num">${rupiah(sisa)}</td>
+        <td>${low ? 'Di bawah ambang' : ((b.ambang_saldo || 0) > 0 ? rupiah(b.ambang_saldo) : '—')}</td></tr>`;
+    }).join('');
+    $('print-report').innerHTML = kop + `
+      <h4 style="margin:14px 0 6px;font-size:11px">Posisi Rekening</h4>
+      <table class="pr-ana-rek"><thead><tr><th>Rekening</th><th class="num">Saldo</th><th>Ambang</th></tr></thead>
+      <tbody>${rekRows || '<tr><td colspan="3">—</td></tr>'}</tbody></table>
+      <section class="pr-ana-charts">
+        <div class="pr-ana-chart"><h4>Pemasukan vs Pengeluaran</h4>${chartM}</div>
+        <div class="pr-ana-chart"><h4>Saldo Berjalan</h4>${chartB}</div>
+      </section>
+      <section class="pr-breakdown">
+        <div class="pr-bd"><h4>Rekap Pemasukan per Kategori</h4><table class="pr-bd-table"><tbody>${bdRows(bdIn)}</tbody></table></div>
+        <div class="pr-bd"><h4>Rekap Pengeluaran per Kategori</h4><table class="pr-bd-table"><tbody>${bdRows(bdOut)}</tbody></table></div>
+      </section>
+      <section class="pr-analisis"><h4>Analisis Pengeluaran</h4><p class="pr-analisis-body">${analisisPengeluaran()}</p></section>
+      ${sign}`;
+    return;
+  }
 
-  $('print-report').innerHTML = html;
+  const openLabel = from ? `Saldo awal per ${tanggalIndo(from)}` : 'SALDO AWAL';
+  let ledgerBody = `<tr class="opening"><td class="c-no"></td><td>—</td><td colspan="2">${openLabel}</td><td class="num"></td><td class="num"></td><td class="num">${rupiah(L.opening)}</td></tr>`;
+  if (L.rows.length === 0) {
+    ledgerBody += `<tr><td colspan="7" class="pr-empty">Tidak ada transaksi pada periode ini.</td></tr>`;
+  } else {
+    ledgerBody += L.rows.map((r, i) => `<tr>
+      <td class="c-no">${i + 1}</td>
+      <td>${tanggalIndo(r.tanggal)}</td>
+      <td>${escapeHtml(r.keterangan) || '—'}</td>
+      <td>${escapeHtml(r.kategori) || '—'}</td>
+      <td class="num r-in">${r.type === 'masuk' ? rupiah(r.jumlah) : ''}</td>
+      <td class="num r-out">${r.type === 'keluar' ? rupiah(r.jumlah) : ''}</td>
+      <td class="num">${rupiah(r.saldo)}</td></tr>`).join('');
+  }
+
+  $('print-report').innerHTML = kop + `
+    <table class="pr-ledger">
+      <thead><tr>
+        <th class="c-no">No</th><th>Tanggal</th><th>Keterangan</th><th>Kategori</th>
+        <th class="num">Pemasukan</th><th class="num">Pengeluaran</th><th class="num">Saldo</th>
+      </tr></thead>
+      <tbody>${ledgerBody}</tbody>
+      <tfoot><tr>
+        <td colspan="4">TOTAL</td>
+        <td class="num">${rupiah(L.tMasuk)}</td>
+        <td class="num">${rupiah(L.tKeluar)}</td>
+        <td class="num">${rupiah(L.saldoAkhir)}</td>
+      </tr></tfoot>
+    </table>
+    <section class="pr-breakdown">
+      <div class="pr-bd"><h4>Rekap Pemasukan per Kategori</h4><table class="pr-bd-table"><tbody>${bdRows(bdIn)}</tbody></table></div>
+      <div class="pr-bd"><h4>Rekap Pengeluaran per Kategori</h4><table class="pr-bd-table"><tbody>${bdRows(bdOut)}</tbody></table></div>
+    </section>
+    <section class="pr-analisis"><h4>Analisis Pengeluaran</h4><p class="pr-analisis-body">${analisisPengeluaran()}</p></section>
+    ${sign}`;
 }
 
 // ============================================================
@@ -1262,7 +1325,7 @@ let lastFocused = null;
 let modalDirty = false;
 
 function closeModals() {
-  ['tx-modal', 'book-modal', 'import-modal', 'users-modal', 'password-modal', 'transfer-modal', 'audit-modal'].forEach((id) => $(id).classList.add('hidden'));
+  ['tx-modal', 'book-modal', 'import-modal', 'users-modal', 'password-modal', 'transfer-modal', 'audit-modal', 'company-modal'].forEach((id) => $(id).classList.add('hidden'));
   modalDirty = false;
   if (lastFocused && typeof lastFocused.focus === 'function') {
     try { lastFocused.focus(); } catch (_) {}
@@ -1299,8 +1362,13 @@ function trapModalTab(e) {
 }
 
 function wireStaticHandlers() {
-  document.querySelectorAll('[data-add]').forEach((btn) =>
-    btn.addEventListener('click', () => openTxModal(btn.dataset.add)));
+  // Delegasi: tombol data-add bisa muncul dinamis (empty state).
+  document.addEventListener('click', (e) => {
+    const addBtn = e.target.closest('[data-add]');
+    if (!addBtn || addBtn.closest('.modal')) return;
+    if (!isAdmin()) return;
+    openTxModal(addBtn.dataset.add);
+  });
 
   const taxMonth = $('tax-month');
   if (taxMonth) {
@@ -1366,7 +1434,6 @@ function wireStaticHandlers() {
     });
   }
   $('kategori-filter').addEventListener('change', (e) => { state.kategori = e.target.value; render(); });
-  $('ana-scope').addEventListener('change', (e) => { state.anaScope = e.target.value; render(); });
   let searchTimer;
   $('search-input').addEventListener('input', (e) => {
     state.search = e.target.value;
@@ -1382,8 +1449,21 @@ function wireStaticHandlers() {
   });
 
   $('new-book-btn').addEventListener('click', () => openBookModal(null));
-  $('theme-btn').addEventListener('click', toggleTheme);
-  $('menu-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
+  $('theme-btn').addEventListener('click', () => { closeMenu(); toggleTheme(); });
+  $('density-btn').addEventListener('click', () => { closeMenu(); toggleDensity(); });
+  $('company-btn').addEventListener('click', () => { closeMenu(); openCompanyModal(); });
+  $('company-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const f = e.target;
+    saveCompany({
+      name: f.name.value.trim() || COMPANY_DEFAULT.name,
+      address: f.address.value.trim(),
+      npwp: f.npwp.value.trim(),
+    });
+    closeModals();
+    toast('Profil cetak disimpan.');
+  });
+  $('menu-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); $('toolbar-more-menu').classList.add('hidden'); });
   $('settings-book-btn').addEventListener('click', () => { closeMenu(); openBookModal(curBook()); });
   $('book-delete').addEventListener('click', deleteBook);
   $('transfer-btn').addEventListener('click', openTransfer);
@@ -1394,11 +1474,23 @@ function wireStaticHandlers() {
   $('audit-btn').addEventListener('click', openAudit);
   $('logout-btn').addEventListener('click', async () => { await api('POST', '/api/auth/logout'); location.reload(); });
 
+  const doPrint = () => { buildPrintReport(); window.print(); };
   $('import-btn').addEventListener('click', openImport);
   $('template-btn').addEventListener('click', downloadTemplate);
   $('export-btn').addEventListener('click', exportCsv);
-  $('print-btn').addEventListener('click', () => { buildPrintReport(); window.print(); });
-  // Bangun ulang laporan bila pengguna mencetak lewat Ctrl/Cmd+P (bukan hanya tombol Cetak).
+  $('print-btn').addEventListener('click', doPrint);
+  const moreBtn = $('toolbar-more-btn');
+  const moreMenu = $('toolbar-more-menu');
+  if (moreBtn && moreMenu) {
+    moreBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeMenu();
+      moreMenu.classList.toggle('hidden');
+    });
+    $('import-btn-more').addEventListener('click', () => { moreMenu.classList.add('hidden'); openImport(); });
+    $('export-btn-more').addEventListener('click', () => { moreMenu.classList.add('hidden'); exportCsv(); });
+    $('print-btn-more').addEventListener('click', () => { moreMenu.classList.add('hidden'); doPrint(); });
+  }
   window.addEventListener('beforeprint', () => { if (state.user) buildPrintReport(); });
 
   document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeModals));
@@ -1409,9 +1501,34 @@ function wireStaticHandlers() {
       if (e.target !== m) return;
       if (m.id === 'bukti-modal') closeBukti(); else requestCloseModals();
     }));
-  document.addEventListener('click', () => closeMenu());
+  document.addEventListener('click', () => { closeMenu(); if (moreMenu) moreMenu.classList.add('hidden'); });
 
-  // Penanda "ada perubahan" untuk modal transaksi & rekening (agar penutupan tak sengaja mengonfirmasi).
+  $('ana-scope').addEventListener('change', (e) => { state.anaScope = e.target.value; render(); });
+  const anaRange = $('ana-range');
+  const anaCustom = $('ana-custom-wrap');
+  const syncAnaCustom = () => {
+    if (anaCustom) anaCustom.classList.toggle('hidden', state.anaRange !== 'custom');
+  };
+  if (anaRange) {
+    anaRange.value = state.anaRange || '12';
+    anaRange.addEventListener('change', (e) => {
+      state.anaRange = e.target.value || '12';
+      syncAnaCustom();
+      if (state.view === 'analitik') renderAnalytics();
+    });
+    syncAnaCustom();
+  }
+  const anaFrom = $('ana-from'), anaTo = $('ana-to');
+  if (anaFrom) anaFrom.addEventListener('change', (e) => {
+    state.anaFrom = e.target.value || '';
+    if (state.view === 'analitik') renderAnalytics();
+  });
+  if (anaTo) anaTo.addEventListener('change', (e) => {
+    state.anaTo = e.target.value || '';
+    if (state.view === 'analitik') renderAnalytics();
+  });
+
+  // Penanda "ada perubahan" untuk modal transaksi & rekening.
   $('tx-form').addEventListener('input', () => { modalDirty = true; });
   $('book-form').addEventListener('input', () => { modalDirty = true; });
 
@@ -1479,9 +1596,53 @@ function anaSaldoAwal() {
   return state.books.reduce((s, b) => s + (b.saldo_awal || 0), 0);
 }
 
+/** Resolve YYYY-MM from/to dari preset periode analitik. */
+function resolveAnaRange() {
+  const now = todayISO().slice(0, 7);
+  const mode = state.anaRange || '12';
+  if (mode === 'all') return { fromYm: '', toYm: '' };
+  if (mode === 'custom') {
+    let fromYm = state.anaFrom || '';
+    let toYm = state.anaTo || '';
+    if (fromYm && toYm && fromYm > toYm) { const t = fromYm; fromYm = toYm; toYm = t; }
+    return { fromYm, toYm: toYm || fromYm || now };
+  }
+  const n = mode === '6' ? 6 : 12;
+  return { fromYm: shiftMonth(now, -(n - 1)), toYm: now };
+}
+
+function anaTxInRange() {
+  const { fromYm, toYm } = resolveAnaRange();
+  const all = anaTx();
+  if (!fromYm && !toYm) return all;
+  return all.filter((t) => {
+    const ym = t.tanggal.slice(0, 7);
+    if (fromYm && ym < fromYm) return false;
+    if (toYm && ym > toYm) return false;
+    return true;
+  });
+}
+
+/** Saldo awal efektif untuk grafik saldo: saldo awal buku + transaksi sebelum fromYm. */
+function anaSaldoAwalForRange() {
+  const base = anaSaldoAwal();
+  const { fromYm } = resolveAnaRange();
+  if (!fromYm) return base;
+  let adj = 0;
+  for (const t of anaTx()) {
+    if (t.tanggal.slice(0, 7) < fromYm) adj += t.type === 'masuk' ? t.jumlah : -t.jumlah;
+  }
+  return base + adj;
+}
+
 function monthlyAgg() {
   const map = new Map();
-  for (const t of anaTx()) {
+  const { fromYm, toYm } = resolveAnaRange();
+  // Isi bulan kosong dalam rentang agar grafik kontinu.
+  if (fromYm && toYm) {
+    for (const ym of monthsBetween(fromYm, toYm)) map.set(ym, { ym, masuk: 0, keluar: 0 });
+  }
+  for (const t of anaTxInRange()) {
     const ym = t.tanggal.slice(0, 7);
     if (!map.has(ym)) map.set(ym, { ym, masuk: 0, keluar: 0 });
     map.get(ym)[t.type] += t.jumlah;
@@ -1491,10 +1652,24 @@ function monthlyAgg() {
 
 function renderAnalytics() {
   refreshChartColors();
-  const has = anaTx().length > 0;
-  $('analytics-empty').classList.toggle('hidden', has);
+  const scoped = anaTx();
+  const has = scoped.length > 0;
+  const emptyEl = $('analytics-empty');
+  if (emptyEl) emptyEl.classList.toggle('hidden', has);
   const body = $('analytics-body');
   if (body) body.classList.toggle('hidden', !has);
+  // Sinkron input custom
+  const wrap = $('ana-custom-wrap');
+  if (wrap) wrap.classList.toggle('hidden', state.anaRange !== 'custom');
+  const { fromYm, toYm } = resolveAnaRange();
+  const af = $('ana-from'), at = $('ana-to');
+  if (af && state.anaRange === 'custom' && !af.value && fromYm) af.value = fromYm;
+  if (at && state.anaRange === 'custom' && !at.value && toYm) at.value = toYm;
+
+  const periodText = (!fromYm && !toYm) ? 'Seluruh periode'
+    : (fromYm === toYm ? labelBulan(fromYm) : `${labelBulan(fromYm)} — ${labelBulan(toYm)}`);
+  document.querySelectorAll('.ana-period-label').forEach((el) => { el.textContent = periodText; });
+
   if (!has) {
     ['compare', 'rekening-summary', 'stat-tiles', 'chart-monthly', 'chart-balance', 'breakdown-keluar', 'breakdown-masuk', 'tax-summary']
       .forEach((id) => { if ($(id)) $(id).innerHTML = ''; });
@@ -1561,11 +1736,14 @@ function renderRekeningSummary() {
     const tx = state.allTransactions.filter((t) => t.book_id === b.id);
     const masuk = tx.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
     const keluar = tx.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
-    return { name: b.name, bank: b.bank_info, saldo: (b.saldo_awal || 0) + masuk - keluar, masuk, keluar };
+    const saldo = (b.saldo_awal || 0) + masuk - keluar;
+    const ambang = b.ambang_saldo || 0;
+    const low = ambang > 0 && saldo < ambang;
+    return { name: b.name, bank: b.bank_info, saldo, masuk, keluar, ambang, low };
   });
   $('rekening-summary').innerHTML = rows.map((r) => `
-    <div class="rek-row">
-      <div class="rek-name">${escapeHtml(r.name)}${r.bank ? ` <span class="muted">· ${escapeHtml(r.bank)}</span>` : ''}</div>
+    <div class="rek-row${r.low ? ' rek-low' : ''}">
+      <div class="rek-name">${escapeHtml(r.name)}${r.bank ? ` <span class="muted">· ${escapeHtml(r.bank)}</span>` : ''}${r.low ? '<span class="rek-badge">Saldo rendah</span>' : ''}</div>
       <div class="rek-nums">
         <span class="rek-in">+${rupiah(r.masuk)}</span>
         <span class="rek-out">−${rupiah(r.keluar)}</span>
@@ -1605,23 +1783,28 @@ function renderCompare() {
   }).join('');
 }
 function renderTiles(months) {
-  const n = months.length;
+  const active = months.filter((m) => m.masuk || m.keluar);
+  const n = active.length || 1;
   const totalMasuk = months.reduce((s, m) => s + m.masuk, 0);
   const totalKeluar = months.reduce((s, m) => s + m.keluar, 0);
   const avgMasuk = totalMasuk / n, avgKeluar = totalKeluar / n, avgNet = avgMasuk - avgKeluar;
-  let big = anaTx()[0];
-  for (const t of anaTx()) if (t.jumlah > big.jumlah) big = t;
-  const bigSub = (big.type === 'masuk' ? 'Pemasukan' : 'Pengeluaran') + (big.keterangan ? ' · ' + big.keterangan : '');
+  const ranged = anaTxInRange();
+  let big = ranged[0];
+  for (const t of ranged) if (t.jumlah > big.jumlah) big = t;
+  const bigSub = big
+    ? ((big.type === 'masuk' ? 'Pemasukan' : 'Pengeluaran') + (big.keterangan ? ' · ' + big.keterangan : ''))
+    : '—';
   const tiles = [
-    { label: 'Rata-rata Pemasukan / bulan', value: rupiah(avgMasuk), sub: `dari ${n} bulan aktif`, cls: 'pos' },
-    { label: 'Rata-rata Pengeluaran / bulan', value: rupiah(avgKeluar), sub: `dari ${n} bulan aktif`, cls: 'neg' },
+    { label: 'Rata-rata Pemasukan / bulan', value: rupiah(avgMasuk), sub: `dari ${active.length} bulan aktif`, cls: 'pos' },
+    { label: 'Rata-rata Pengeluaran / bulan', value: rupiah(avgKeluar), sub: `dari ${active.length} bulan aktif`, cls: 'neg' },
     { label: 'Rata-rata Sisa / bulan', value: rupiah(avgNet), sub: avgNet >= 0 ? 'surplus' : 'defisit', cls: avgNet >= 0 ? 'pos' : 'neg' },
-    { label: 'Transaksi Terbesar', value: rupiah(big.jumlah), sub: bigSub, cls: big.type === 'masuk' ? 'pos' : 'neg' },
+    { label: 'Transaksi Terbesar', value: big ? rupiah(big.jumlah) : 'Rp0', sub: bigSub, cls: big && big.type === 'masuk' ? 'pos' : 'neg' },
   ];
   $('stat-tiles').innerHTML = tiles.map((t) =>
     `<div class="tile"><span class="tile-label">${t.label}</span><span class="tile-value ${t.cls}">${t.value}</span><span class="tile-sub">${escapeHtml(t.sub)}</span></div>`).join('');
 }
 function renderMonthlyChart(months) {
+  if (!months.length) { $('chart-monthly').innerHTML = '<p class="breakdown-empty">Belum ada data periode.</p>'; return; }
   const H = 280, padL = 58, padR = 12, padT = 12, padB = 34, plotH = H - padT - padB;
   const groupW = Math.max(52, Math.min(120, 640 / months.length));
   const W = Math.round(padL + padR + groupW * months.length);
@@ -1642,8 +1825,9 @@ function renderMonthlyChart(months) {
   $('chart-monthly').innerHTML = svg + '</svg>';
 }
 function renderBalanceChart(months) {
+  if (!months.length) { $('chart-balance').innerHTML = '<p class="breakdown-empty">Belum ada data periode.</p>'; return; }
   const H = 240, padL = 58, padR = 34, padT = 16, padB = 30, plotH = H - padT - padB;
-  let cum = anaSaldoAwal();
+  let cum = anaSaldoAwalForRange();
   const pts = months.map((m) => ({ ym: m.ym, v: (cum += m.masuk - m.keluar) }));
   const step = pts.length > 1 ? Math.max(50, Math.min(120, 620 / (pts.length - 1))) : 0;
   const innerW = pts.length > 1 ? step * (pts.length - 1) : 360;
@@ -1668,7 +1852,7 @@ function renderBalanceChart(months) {
 }
 function renderBreakdown(type, container) {
   const map = new Map();
-  for (const t of anaTx()) {
+  for (const t of anaTxInRange()) {
     if (t.type !== type) continue;
     const k = t.kategori || 'Tanpa kategori';
     map.set(k, (map.get(k) || 0) + t.jumlah);

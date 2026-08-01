@@ -132,8 +132,19 @@ Tiga lapis pengaman:
 
 1. **Cadangkan manual** — menu **☰ → Cadangkan data (JSON)**. Berkas berisi semua rekening + transaksi **+ bukti lampiran** (format v2).
 2. **Pulihkan** — menu **☰ → Pulihkan dari cadangan**, pilih file JSON. ⚠️ Menimpa seluruh data saat ini.
-3. **Cadangan otomatis harian (off-site)** — GitHub Actions (`.github/workflows/backup.yml`) menjalankan `pg_dump` tiap hari dan menyimpannya sebagai artifact (retensi 30 hari).
-   Aktifkan dengan menambah **secret `DATABASE_URL`** di repo: **Settings → Secrets and variables → Actions → New repository secret** (isi dengan Database URL dari Render).
+3. **Cadangan otomatis harian (off-site)** — GitHub Actions (`.github/workflows/backup.yml`) menjalankan `pg_dump`, mengompresi, lalu **mengenkripsi AES-256-CBC (PBKDF2)** sebelum diunggah sebagai artifact (retensi 30 hari).
+   Aktifkan dengan menambah secrets di repo: **Settings → Secrets and variables → Actions**:
+   - `DATABASE_URL` — Database URL dari Render
+   - `BACKUP_ENCRYPTION_KEY` — passphrase kuat (jangan dibagikan / di-commit)
+
+   Dekripsi lokal (ganti nama berkas sesuai artifact):
+
+   ```bash
+   openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:'YOUR_KEY' \
+     -in sintesa-backup-YYYYMMDD-HHMMSS.sql.gz.enc \
+     -out sintesa-backup.sql.gz
+   gunzip -c sintesa-backup.sql.gz | psql "$DATABASE_URL"
+   ```
 
 > Postgres **paket gratis Render kedaluwarsa** setelah beberapa waktu. Untuk data serius, ubah `plan: free` → `plan: basic` di `render.yaml` agar tidak kedaluwarsa dan mendapat backup terkelola. Cadangan otomatis di atas tetap disarankan sebagai salinan off-site.
 

@@ -46,43 +46,41 @@
             <span class="sr-only">Pilih rekening</span>
             <select id="book-select" title="Sumber Rekening"></select>
           </label>
-          <button id="new-book-btn" class="btn btn-ghost admin-only" title="Rekening baru">＋ Rekening</button>
-          <button id="theme-btn" class="icon-toggle" title="Ganti tema terang/gelap" aria-label="Ganti tema">🌙</button>
+          <button id="new-book-btn" class="btn btn-ghost admin-only topbar-extra" title="Rekening baru">＋ Rekening</button>
           <div class="menu">
-            <button id="menu-btn" class="btn btn-ghost" aria-label="Menu">☰</button>
+            <button id="menu-btn" class="btn btn-ghost" aria-label="Menu" aria-haspopup="true">Menu</button>
             <div id="menu-dropdown" class="menu-dropdown hidden">
-              <button id="settings-book-btn" class="admin-only">⚙ Pengaturan rekening</button>
-              <button id="transfer-btn" class="admin-only">⇄ Transfer antar rekening</button>
+              <button id="settings-book-btn" class="admin-only">Pengaturan rekening</button>
+              <button id="transfer-btn" class="admin-only">Transfer antar rekening</button>
               <hr class="admin-only" />
-              <button id="users-btn" class="admin-only">👥 Kelola pengguna</button>
-              <button id="password-btn">🔑 Ganti password</button>
-              <button id="backup-btn" class="admin-only">💾 Cadangkan data (JSON)</button>
-              <button id="restore-btn" class="admin-only">♻ Pulihkan dari cadangan</button>
-              <button id="audit-btn" class="admin-only">📜 Riwayat aktivitas</button>
+              <button id="users-btn" class="admin-only">Kelola pengguna</button>
+              <button id="password-btn">Ganti password</button>
+              <button id="company-btn">Profil cetak</button>
+              <button id="backup-btn" class="admin-only">Cadangkan data (JSON)</button>
+              <button id="restore-btn" class="admin-only">Pulihkan dari cadangan</button>
+              <button id="audit-btn" class="admin-only">Riwayat aktivitas</button>
               <input id="restore-file" type="file" accept="application/json,.json" class="hidden" />
               <hr />
+              <button type="button" id="theme-btn">Tema terang</button>
+              <button type="button" id="density-btn">Tabel rapat</button>
+              <hr />
               <span class="menu-user" id="menu-user"></span>
-              <button id="logout-btn">↩ Keluar</button>
+              <button id="logout-btn">Keluar</button>
             </div>
           </div>
         </div>
       </header>
 
       <div class="statusrail">
-        <span class="dot" aria-hidden="true"></span>
-        <span class="sr-live">AKTIF</span>
-        <span class="sr-sep">|</span>
-        <span id="sr-clock">--:--:--</span>
-        <span class="sr-sep">|</span>
         <span id="sr-user"></span>
-        <span id="sr-role" class="sr-role hidden">HANYA-BACA</span>
+        <span id="sr-role" class="sr-role hidden">Hanya baca</span>
       </div>
 
       <main class="container">
         <!-- Alert saldo rendah -->
         <section id="low-balance-alert" class="alert-banner hidden" role="status" aria-live="polite"></section>
 
-        <!-- Ringkasan beranda (bulan kalender berjalan — tidak ikut filter Catatan) -->
+        <!-- Ringkasan beranda + meta rekening (satu blok) -->
         <section class="home-dash" id="home-dash" aria-label="Arus kas bulan ini">
           <div class="home-dash-head">
             <div>
@@ -91,6 +89,7 @@
             </div>
             <span class="home-dash-month" id="home-month-label"></span>
           </div>
+          <div class="book-info home-meta" id="book-info"></div>
           <div class="home-dash-stats">
             <div class="home-stat home-stat-in">
               <span class="home-stat-label">Masuk</span>
@@ -111,11 +110,8 @@
           </div>
         </section>
 
-        <!-- Info buku -->
-        <section class="book-info" id="book-info"></section>
-
-        <!-- Ringkasan (mengikuti filter Catatan bila aktif) -->
-        <section class="cards" aria-label="Ringkasan tampilan">
+        <!-- Ringkasan filter (hanya tampil bila filter Catatan aktif) -->
+        <section class="cards hidden" id="filter-cards" aria-label="Ringkasan filter">
           <p class="cards-caption muted" id="cards-caption"></p>
           <div class="card card-in tick">
             <span class="card-label" id="lbl-masuk">Total Pemasukan</span>
@@ -163,15 +159,37 @@
           </div>
 
           <div class="tool-filters hidden" id="tools-analitik">
-            <label class="field-inline"><span>Analitik</span>
+            <label class="field-inline"><span>Scope</span>
               <select id="ana-scope"><option value="">Gabungan (Semua Rekening)</option></select>
+            </label>
+            <label class="field-inline"><span>Periode</span>
+              <select id="ana-range">
+                <option value="12">12 bulan</option>
+                <option value="6">6 bulan</option>
+                <option value="all">Semua</option>
+                <option value="custom">Kustom</option>
+              </select>
+            </label>
+            <label class="field-inline ana-custom hidden" id="ana-custom-wrap">
+              <span>Dari</span><input id="ana-from" type="month" />
+              <span>Sampai</span><input id="ana-to" type="month" />
             </label>
           </div>
 
           <div class="toolbar-right">
-            <button id="import-btn" class="btn btn-ghost admin-only">⬆ Impor</button>
-            <button id="export-btn" class="btn btn-ghost">⬇ Ekspor</button>
-            <button id="print-btn" class="btn btn-ghost">🖨 Cetak</button>
+            <div class="toolbar-actions" id="toolbar-actions">
+              <button id="import-btn" class="btn btn-ghost admin-only">Impor</button>
+              <button id="export-btn" class="btn btn-ghost">Ekspor</button>
+              <button id="print-btn" class="btn btn-ghost">Cetak</button>
+            </div>
+            <div class="menu toolbar-more">
+              <button type="button" id="toolbar-more-btn" class="btn btn-ghost btn-sm" aria-haspopup="true">Lainnya</button>
+              <div id="toolbar-more-menu" class="menu-dropdown hidden">
+                <button type="button" id="import-btn-more" class="admin-only">Impor CSV</button>
+                <button type="button" id="export-btn-more">Ekspor</button>
+                <button type="button" id="print-btn-more">Cetak</button>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -225,7 +243,10 @@
 
         <!-- ===== ANALITIK ===== -->
         <section class="analytics hidden" id="analytics-view" role="tabpanel" aria-labelledby="tab-analitik">
-          <p class="analytics-empty hidden" id="analytics-empty">Belum ada data untuk dianalisis. Pilih scope lain atau catat transaksi terlebih dahulu.</p>
+          <p class="analytics-empty hidden" id="analytics-empty">
+            Belum ada data untuk dianalisis.
+            <button type="button" class="btn btn-in btn-sm admin-only empty-cta" data-add="masuk">＋ Tambah pemasukan</button>
+          </p>
 
           <div id="analytics-body" class="analytics-body">
             <!-- 1. Ringkasan periode -->
@@ -251,7 +272,7 @@
             <div class="ana-block">
               <header class="ana-block-head">
                 <h3 class="ana-block-title">Tren</h3>
-                <p class="ana-block-sub">Arus kas dan saldo akumulasi per bulan</p>
+                <p class="ana-block-sub ana-period-label">Arus kas dan saldo akumulasi per bulan</p>
               </header>
               <div class="ana-charts">
                 <div class="ana-chart">
@@ -275,7 +296,7 @@
             <div class="ana-block">
               <header class="ana-block-head">
                 <h3 class="ana-block-title">Komposisi Kategori</h3>
-                <p class="ana-block-sub">Proporsi sepanjang seluruh periode scope</p>
+                <p class="ana-block-sub ana-period-label">Proporsi sepanjang periode terpilih</p>
               </header>
               <div class="chart-grid">
                 <div class="ana-panel">
@@ -365,7 +386,7 @@
           <p class="muted" style="margin:-6px 0 12px;font-size:12px">Peringatan muncul bila saldo rekening di bawah ambang ini.</p>
           <p class="form-error" role="alert" id="book-error"></p>
           <div class="modal-actions">
-            <button type="button" class="btn btn-danger btn-sm hidden" id="book-delete">🗑 Hapus Rekening</button>
+            <button type="button" class="btn btn-danger btn-sm hidden" id="book-delete">Hapus Rekening</button>
             <button type="button" class="btn btn-ghost" data-close>Batal</button>
             <button type="submit" class="btn btn-primary">Simpan</button>
           </div>
@@ -379,7 +400,7 @@
         <h3 id="import-modal-title">Impor dari CSV</h3>
         <p class="muted">Unggah file CSV dengan kolom: <strong>Jenis, Tanggal, Jumlah, Keterangan, Kategori</strong>.
           Jenis diisi <em>Pemasukan</em>/<em>Pengeluaran</em> (atau masuk/keluar). Tanggal format <em>YYYY-MM-DD</em>.</p>
-        <p><button type="button" id="template-btn" class="btn btn-ghost btn-sm">⬇ Unduh template</button></p>
+        <p><button type="button" id="template-btn" class="btn btn-ghost btn-sm">Unduh template</button></p>
         <label class="file-drop">
           <input id="import-file" type="file" accept=".csv,text/csv" />
           <span>Pilih file CSV…</span>
@@ -396,7 +417,7 @@
         <h3 id="bukti-modal-title">Bukti Transaksi</h3>
         <div id="bukti-view-area" class="bukti-view-area"></div>
         <div class="modal-actions">
-          <a id="bukti-download" class="btn btn-ghost" download>⬇ Unduh</a>
+          <a id="bukti-download" class="btn btn-ghost" download>Unduh</a>
           <button type="button" id="bukti-close" class="btn btn-primary">Tutup</button>
         </div>
       </div>
@@ -462,6 +483,23 @@
         <p class="muted">200 kejadian terakhir (buat / ubah / hapus / transfer / pulihkan).</p>
         <div class="table-wrap"><table class="audit-table"><tbody id="audit-list"></tbody></table></div>
         <div class="modal-actions"><button type="button" class="btn btn-primary" data-close>Tutup</button></div>
+      </div>
+    </div>
+
+    <!-- ======================= MODAL PROFIL CETAK ======================= -->
+    <div id="company-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="company-modal-title">
+      <div class="modal-box">
+        <h3 id="company-modal-title">Profil Cetak</h3>
+        <p class="muted">Ditampilkan di kop laporan PDF. Disimpan di perangkat ini.</p>
+        <form id="company-form">
+          <label>Nama perusahaan<input name="name" maxlength="120" placeholder="PT Sintesa Data Semesta" /></label>
+          <label>Alamat<textarea name="address" rows="3" maxlength="400" placeholder="Jl. …, Kota, Kode Pos"></textarea></label>
+          <label>NPWP<input name="npwp" maxlength="40" placeholder="00.000.000.0-000.000" /></label>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Batal</button>
+            <button type="submit" class="btn btn-primary">Simpan</button>
+          </div>
+        </form>
       </div>
     </div>
 

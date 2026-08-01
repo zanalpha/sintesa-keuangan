@@ -1,9 +1,11 @@
 name: Cadangan DB Harian
 
-# Backup off-site otomatis: pg_dump database Render setiap hari, disimpan sebagai
-# artifact GitHub (retensi 30 hari). WAJIB set secret DATABASE_URL di repo:
-#   Settings > Secrets and variables > Actions > New repository secret
-#   Name: DATABASE_URL  Value: (Internal/External Database URL dari Render)
+# Backup off-site otomatis: pg_dump database Render setiap hari, dienkripsi AES-256,
+# disimpan sebagai artifact GitHub (retensi 30 hari).
+#
+# Secrets yang WAJIB diisi di repo (Settings → Secrets and variables → Actions):
+#   DATABASE_URL            — Internal/External Database URL dari Render
+#   BACKUP_ENCRYPTION_KEY   — passphrase kuat untuk enkripsi dump (jangan commit)
 on:
   schedule:
     - cron: '0 19 * * *' # 19:00 UTC = 02:00 WIB setiap hari
@@ -20,18 +22,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client-16
 
-      - name: pg_dump -> berkas terkompresi
+      - name: pg_dump → gzip → AES-256
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
         run: |
           if [ -z "$DATABASE_URL" ]; then echo "Secret DATABASE_URL belum diisi."; exit 1; fi
+          if [ -z "$BACKUP_ENCRYPTION_KEY" ]; then echo "Secret BACKUP_ENCRYPTION_KEY belum diisi."; exit 1; fi
           ts=$(date -u +%Y%m%d-%H%M%S)
-          /usr/lib/postgresql/16/bin/pg_dump "$DATABASE_URL" | gzip > "sintesa-backup-$ts.sql.gz"
-          ls -lh sintesa-backup-*.sql.gz
+          plain="sintesa-backup-$ts.sql.gz"
+          enc="${plain}.enc"
+          /usr/lib/postgresql/16/bin/pg_dump "$DATABASE_URL" | gzip > "$plain"
+          openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:BACKUP_ENCRYPTION_KEY -in "$plain" -out "$enc"
+          rm -f "$plain"
+          ls -lh sintesa-backup-*.sql.gz.enc
 
-      - name: Unggah sebagai artifact (off-site, retensi 30 hari)
+      - name: Unggah artifact terenkripsi (retensi 30 hari)
         uses: actions/upload-artifact@v4
         with:
           name: sintesa-db-backup-${{ github.run_id }}
-          path: sintesa-backup-*.sql.gz
+          path: sintesa-backup-*.sql.gz.enc
           retention-days: 30
