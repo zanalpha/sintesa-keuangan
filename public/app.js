@@ -547,7 +547,7 @@ function renderColumn(type, list) {
     const emptyMsg = state.month
       ? `Belum ada data di ${labelBulan(state.month)}.`
       : 'Belum ada data.';
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="5">${emptyMsg}${cta}</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="5"><div>${emptyMsg}</div>${cta}</td></tr>`;
   } else {
     list.forEach((t, i) => {
       const tr = document.createElement('tr');
@@ -555,7 +555,7 @@ function renderColumn(type, list) {
         <td class="c-no">${i + 1}</td>
         <td class="c-date">${tanggalIndo(t.tanggal)}</td>
         <td class="c-amt">${rupiah(t.jumlah)}</td>
-        <td>${escapeHtml(t.keterangan) || '<span class="muted">—</span>'}${t.kategori ? ` <span class="muted">· ${escapeHtml(t.kategori)}</span>` : ''}${t.has_bukti ? ` <button type="button" class="bukti-chip" data-bukti="${t.id}" title="Lihat bukti">bukti</button>` : ''}</td>
+        <td class="c-ket">${escapeHtml(t.keterangan) || '<span class="muted">—</span>'}${t.kategori ? ` <span class="muted">· ${escapeHtml(t.kategori)}</span>` : ''}${t.has_bukti ? ` <button type="button" class="bukti-chip" data-bukti="${t.id}" title="Lihat bukti">bukti</button>` : ''}</td>
         <td class="c-act"><div class="row-actions">${isAdmin() ? `
           <button class="icon-btn" title="Ubah" aria-label="Ubah transaksi ${tanggalIndo(t.tanggal)} ${rupiah(t.jumlah)}" data-edit="${t.id}">Ubah</button>
           <button class="icon-btn" title="Hapus" aria-label="Hapus transaksi ${tanggalIndo(t.tanggal)} ${rupiah(t.jumlah)}" data-del="${t.id}">Hapus</button>` : ''}
