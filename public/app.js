@@ -91,7 +91,7 @@ const state = {
   bookId: null,
   transactions: [],       // transaksi rekening terpilih (Catatan/Buku Besar)
   allTransactions: [],    // semua transaksi lintas rekening (Analitik gabungan)
-  month: '',
+  month: null,            // null = belum diisi; diisi dari localStorage / bulan ini
   kategori: '',
   search: '',
   besarFrom: '',
@@ -254,6 +254,7 @@ function buildAnaScope() {
 // Bulan ekstra yang ditambahkan pengguna (bisa kosong / belum ada transaksi).
 // Disimpan di localStorage agar bulan ke depan tetap tersedia setelah reload.
 const EXTRA_MONTHS_KEY = 'sintesa_extra_months';
+const MONTH_KEY = 'sintesa_month'; // pilihan filter bulan terakhir (YYYY-MM atau '' = Semua)
 const FUTURE_MONTHS = 6; // otomatis sediakan 6 bulan ke depan dari bulan berjalan
 
 function loadExtraMonths() {
@@ -276,6 +277,22 @@ function addExtraMonth(ym) {
   return true;
 }
 
+/** Ambil preferensi bulan: pilihan terakhir, atau bulan berjalan jika belum pernah diset. */
+function loadSavedMonth() {
+  try {
+    const v = localStorage.getItem(MONTH_KEY);
+    if (v === null) return todayISO().slice(0, 7); // kunjungan pertama → bulan ini
+    if (v === '') return ''; // pengguna memilih "Semua bulan"
+    return isYearMonth(v) ? v : todayISO().slice(0, 7);
+  } catch (_) {
+    return todayISO().slice(0, 7);
+  }
+}
+function saveMonth(ym) {
+  try { localStorage.setItem(MONTH_KEY, ym == null ? '' : String(ym)); }
+  catch (_) { /* private mode / quota */ }
+}
+
 /** Kumpulkan opsi bulan: data transaksi + bulan ini + 6 bulan ke depan + ekstra manual. */
 function availableMonths() {
   const fromTx = state.transactions.map((t) => t.tanggal.slice(0, 7)).filter(isYearMonth);
@@ -285,18 +302,31 @@ function availableMonths() {
 }
 
 function buildMonthFilter() {
+  // Isi preferensi sekali: localStorage → bulan ini.
+  if (state.month === null) state.month = loadSavedMonth();
+
+  let preferred = state.month;
+  // Pastikan bulan tersimpan (mis. bulan lalu tanpa transaksi) tetap muncul di daftar.
+  if (isYearMonth(preferred)) addExtraMonth(preferred);
+
   const months = availableMonths();
   const sel = $('month-filter');
-  const current = state.month;
   sel.innerHTML = '<option value="">Semua bulan</option>';
   for (const m of months) {
     const o = document.createElement('option');
     o.value = m; o.textContent = labelBulan(m);
     sel.appendChild(o);
   }
-  // Pertahankan pilihan aktif (termasuk bulan ke depan yang belum ada data).
-  sel.value = months.includes(current) ? current : '';
+
+  if (preferred === '' || months.includes(preferred)) {
+    sel.value = preferred;
+  } else {
+    // Cadangan: bulan berjalan (selalu ada di horizon).
+    preferred = todayISO().slice(0, 7);
+    sel.value = preferred;
+  }
   state.month = sel.value;
+  saveMonth(state.month);
 }
 
 /** Tanggal default saat tambah transaksi: ikuti filter bulan bila aktif. */
@@ -1245,17 +1275,22 @@ function wireStaticHandlers() {
 
   $('book-select').addEventListener('change', (e) => {
     state.bookId = Number(e.target.value);
-    state.month = ''; state.kategori = ''; state.search = ''; state.besarFrom = ''; state.besarTo = '';
+    // Filter bulan dipertahankan antar rekening (disimpan di localStorage).
+    state.kategori = ''; state.search = ''; state.besarFrom = ''; state.besarTo = '';
     $('search-input').value = ''; $('besar-from').value = ''; $('besar-to').value = '';
     loadData();
   });
-  $('month-filter').addEventListener('change', (e) => { state.month = e.target.value; render(); });
+  $('month-filter').addEventListener('change', (e) => {
+    state.month = e.target.value;
+    saveMonth(state.month);
+    render();
+  });
   // Tombol "+ Bulan": buka pemilih bulan native, lalu masukkan ke filter (termasuk bulan ke depan).
   const addMonthBtn = $('add-month-btn');
   const addMonthPicker = $('add-month-picker');
   if (addMonthBtn && addMonthPicker) {
     addMonthBtn.addEventListener('click', () => {
-      addMonthPicker.value = state.month || todayISO().slice(0, 7);
+      addMonthPicker.value = (isYearMonth(state.month) ? state.month : null) || todayISO().slice(0, 7);
       try { addMonthPicker.showPicker(); }
       catch (_) { addMonthPicker.focus(); addMonthPicker.click(); }
     });
@@ -1263,6 +1298,7 @@ function wireStaticHandlers() {
       const ym = addMonthPicker.value;
       if (!addExtraMonth(ym)) return;
       state.month = ym;
+      saveMonth(ym);
       buildMonthFilter();
       render();
       toast(`Bulan ${labelBulan(ym)} ditambahkan. Silakan catat transaksi.`);
