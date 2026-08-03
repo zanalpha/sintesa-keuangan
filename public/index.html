@@ -65,31 +65,27 @@
               <button type="button" id="density-btn">Tabel rapat</button>
               <hr />
               <span class="menu-user" id="menu-user"></span>
+              <span id="sr-role" class="sr-role hidden">Mode hanya baca</span>
               <button id="logout-btn">Keluar</button>
             </div>
           </div>
         </div>
       </header>
 
-      <div class="statusrail">
-        <span id="sr-user"></span>
-        <span id="sr-role" class="sr-role hidden">Hanya baca</span>
-      </div>
-
       <main class="container">
         <!-- Alert saldo rendah -->
         <section id="low-balance-alert" class="alert-banner hidden" role="status" aria-live="polite"></section>
 
-        <!-- Ringkasan beranda + meta rekening (satu blok) -->
-        <section class="home-dash" id="home-dash" aria-label="Arus kas bulan ini">
+        <!-- Ringkasan: saldo hidup + arus bulan terpilih -->
+        <section class="home-dash" id="home-dash" aria-label="Ringkasan rekening">
           <div class="home-dash-head">
-            <div>
-              <h2 class="home-dash-title">Arus Kas Bulan Ini</h2>
-              <p class="home-dash-note">Mengikuti bulan yang dipilih</p>
-            </div>
+            <h2 class="home-dash-title">Ringkasan</h2>
             <span class="home-dash-month" id="home-month-label"></span>
           </div>
-          <div class="book-info home-meta" id="book-info"></div>
+          <div class="home-balance">
+            <span class="home-balance-label">Saldo rekening</span>
+            <span class="home-balance-value" id="home-saldo">Rp0</span>
+          </div>
           <div class="home-dash-stats">
             <div class="home-stat home-stat-in">
               <span class="home-stat-label">Masuk</span>
@@ -100,25 +96,22 @@
               <span class="home-stat-value" id="home-keluar">Rp0</span>
             </div>
             <div class="home-stat home-stat-net">
-              <span class="home-stat-label">Net (masuk − keluar)</span>
+              <span class="home-stat-label">Selisih bulan</span>
               <span class="home-stat-value" id="home-sisa">Rp0</span>
             </div>
           </div>
-          <div class="home-recent">
-            <h3>5 Transaksi Terakhir</h3>
-            <ul id="home-recent-list" class="home-recent-list"></ul>
-          </div>
+          <p class="home-meta muted" id="book-info"></p>
         </section>
 
-        <!-- Ringkasan filter (hanya tampil bila filter Catatan aktif) -->
+        <!-- Ringkasan filter kategori/cari (bukan bulan — itu sudah di atas) -->
         <section class="cards hidden" id="filter-cards" aria-label="Ringkasan filter">
           <p class="cards-caption muted" id="cards-caption"></p>
           <div class="card card-in tick">
-            <span class="card-label" id="lbl-masuk">Total Pemasukan</span>
+            <span class="card-label" id="lbl-masuk">Pemasukan (filter)</span>
             <span class="card-value" id="sum-masuk">Rp0</span>
           </div>
           <div class="card card-out tick">
-            <span class="card-label" id="lbl-keluar">Total Pengeluaran</span>
+            <span class="card-label" id="lbl-keluar">Pengeluaran (filter)</span>
             <span class="card-value" id="sum-keluar">Rp0</span>
           </div>
           <div class="card card-balance tick">
@@ -159,8 +152,8 @@
           </div>
 
           <div class="tool-filters hidden" id="tools-analitik">
-            <label class="field-inline"><span>Scope</span>
-              <select id="ana-scope"><option value="">Gabungan (Semua Rekening)</option></select>
+            <label class="field-inline"><span>Rekening</span>
+              <select id="ana-scope"><option value="">Semua rekening</option></select>
             </label>
             <label class="field-inline"><span>Bulan</span>
               <select id="ana-month"></select>
@@ -218,7 +211,7 @@
         <!-- ===== BUKU BESAR (saldo berjalan) ===== -->
         <section class="besar hidden" id="besar-view" role="tabpanel" aria-labelledby="tab-besar">
           <div class="panel">
-            <div class="panel-head"><h2>Buku Besar — Saldo Berjalan</h2><span id="besar-range" class="muted"></span></div>
+            <div class="panel-head"><h2>Buku Besar</h2><span id="besar-range" class="muted"></span></div>
             <div class="table-wrap">
               <table class="tx-table besar-table">
                 <thead><tr>
@@ -240,10 +233,10 @@
           </p>
 
           <div id="analytics-body" class="analytics-body">
-            <!-- 1. Ringkasan periode -->
+            <!-- 1. Ringkasan bulan -->
             <div class="ana-block">
               <header class="ana-block-head">
-                <h3 class="ana-block-title">Ringkasan Periode</h3>
+                <h3 class="ana-block-title">Ringkasan</h3>
                 <p class="ana-block-sub" id="compare-title">Bulan ini vs bulan lalu</p>
               </header>
               <div class="compare" id="compare"></div>
@@ -254,7 +247,7 @@
             <div class="ana-block">
               <header class="ana-block-head">
                 <h3 class="ana-block-title">Posisi Rekening</h3>
-                <p class="ana-block-sub ana-period-label">Aktivitas bulan terpilih</p>
+                <p class="ana-block-sub">Masuk / keluar bulan · saldo hidup</p>
               </header>
               <div id="rekening-summary" class="rek-summary"></div>
             </div>
@@ -262,20 +255,19 @@
             <!-- 3. Tren -->
             <div class="ana-block">
               <header class="ana-block-head">
-                <h3 class="ana-block-title">Tren</h3>
-                <p class="ana-block-sub ana-period-label">Arus kas bulan terpilih</p>
+                <h3 class="ana-block-title">Grafik Bulan</h3>
               </header>
               <div class="ana-charts">
                 <div class="ana-chart">
                   <div class="chart-head">
-                    <h4>Pemasukan vs Pengeluaran</h4>
+                    <h4>Masuk vs Keluar</h4>
                     <div class="legend"><span class="lg lg-in">Masuk</span><span class="lg lg-out">Keluar</span></div>
                   </div>
                   <div class="chart-scroll"><div id="chart-monthly" class="chart"></div></div>
                 </div>
                 <div class="ana-chart">
                   <div class="chart-head">
-                    <h4>Saldo Berjalan</h4>
+                    <h4>Saldo akhir bulan</h4>
                     <div class="legend"><span class="lg lg-bal">Saldo</span></div>
                   </div>
                   <div class="chart-scroll"><div id="chart-balance" class="chart"></div></div>
@@ -286,8 +278,7 @@
             <!-- 4. Komposisi kategori -->
             <div class="ana-block">
               <header class="ana-block-head">
-                <h3 class="ana-block-title">Komposisi Kategori</h3>
-                <p class="ana-block-sub ana-period-label">Proporsi bulan terpilih</p>
+                <h3 class="ana-block-title">Kategori</h3>
               </header>
               <div class="chart-grid">
                 <div class="ana-panel">
@@ -305,15 +296,11 @@
             <div class="ana-block tax-card">
               <header class="ana-block-head">
                 <div>
-                  <h3 class="ana-block-title">Ringkasan Pajak</h3>
-                  <p class="ana-block-sub">Perkiraan internal — bukan e-filing</p>
+                  <h3 class="ana-block-title">Perkiraan Pajak</h3>
+                  <p class="ana-block-sub">Internal — bukan e-filing · ikut bulan Analitik</p>
                 </div>
-                <label class="field-inline">
-                  <span>Bulan</span>
-                  <input id="tax-month" type="month" />
-                </label>
+                <input id="tax-month" type="month" class="sr-only" tabindex="-1" aria-hidden="true" />
               </header>
-              <p class="muted tax-disclaimer">Dihitung dari transaksi scope terpilih. Sesuaikan dengan konsultan pajak Anda.</p>
               <div id="tax-summary" class="tax-summary"></div>
             </div>
           </div>

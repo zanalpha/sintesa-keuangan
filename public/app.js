@@ -220,7 +220,6 @@ async function enterApp() {
   $('auth-view').classList.add('hidden');
   $('app-view').classList.remove('hidden');
   $('menu-user').textContent = 'Masuk sebagai ' + state.user.name + (isAdmin() ? '' : ' (viewer)');
-  $('sr-user').textContent = state.user.name;
   applyRole();
   await loadBooks();
 }
@@ -272,7 +271,7 @@ async function loadData() {
 function buildAnaScope() {
   const sel = $('ana-scope');
   const cur = String(state.anaScope || '');
-  sel.innerHTML = '<option value="">Gabungan (Semua Rekening)</option>' +
+  sel.innerHTML = '<option value="">Semua rekening</option>' +
     state.books.map((b) => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
   const ids = state.books.map((b) => String(b.id));
   sel.value = ids.includes(cur) ? cur : '';
@@ -425,47 +424,23 @@ function render() {
   const scopeTx = analitik ? anaTx() : state.transactions;
   const scopeSaldoAwal = analitik ? anaSaldoAwal() : (book ? book.saldo_awal : 0);
 
-  // Kartu masuk/keluar pada Catatan mengikuti filter (bulan/kategori/cari); view lain = seluruh scope.
+  // Kartu filter hanya untuk kategori/cari (bulan sudah di ringkasan beranda).
   const cardTx = state.view === 'catatan' ? visibleTx() : scopeTx;
   const totalMasuk = cardTx.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
   const totalKeluar = cardTx.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
-
-  // Saldo kartu: jangan pernah pakai saldo_awal + total terfilter (salah secara akuntansi).
-  // - Catatan + filter bulan saja → saldo akhir periode (computeLedger)
-  // - Catatan + kategori/cari → tampilkan saldo rekening penuh (bukan "saldo filter")
-  // - Selain itu → saldo rekening / scope penuh
-  const filterBits = [];
-  if (state.view === 'catatan') {
-    if (state.month) filterBits.push(labelBulan(state.month));
-    if (state.kategori) filterBits.push('kategori ' + state.kategori);
-    if (state.search.trim()) filterBits.push('pencarian');
-  }
   const hasSoftFilter = !!(state.kategori || state.search.trim());
-  let saldoCard;
+
+  let saldoCard = bookSisa(book);
   let lblSisa = 'Saldo Rekening';
-  let lblMasuk = 'Total Pemasukan';
-  let lblKeluar = 'Total Pengeluaran';
+  let lblMasuk = 'Pemasukan (filter)';
+  let lblKeluar = 'Pengeluaran (filter)';
   let caption = '';
 
-  if (state.view === 'catatan' && state.month && !hasSoftFilter) {
-    const L = computeLedger(state.transactions, book ? book.saldo_awal : 0, `${state.month}-01`, `${state.month}-31`);
-    saldoCard = L.saldoAkhir;
-    lblSisa = 'Saldo per ' + labelBulan(state.month);
-    lblMasuk = 'Pemasukan bulan';
-    lblKeluar = 'Pengeluaran bulan';
-    caption = 'Kartu mengikuti filter bulan. Saldo dihitung dengan pembuka periode (sama seperti Buku Besar).';
-  } else if (state.view === 'catatan' && filterBits.length) {
-    saldoCard = bookSisa(book);
-    lblSisa = 'Saldo Rekening';
-    lblMasuk = 'Pemasukan (filter)';
-    lblKeluar = 'Pengeluaran (filter)';
-    caption = 'Masuk/keluar mengikuti filter (' + filterBits.join(', ') + '). Saldo Rekening = saldo penuh, tidak terpotong filter.';
-  } else {
-    saldoCard = analitik
-      ? scopeSaldoAwal + totalMasuk - totalKeluar
-      : bookSisa(book);
-    lblSisa = analitik ? 'Saldo Scope' : 'Saldo Rekening';
-    caption = '';
+  if (state.view === 'catatan' && hasSoftFilter) {
+    const bits = [];
+    if (state.kategori) bits.push('kategori ' + state.kategori);
+    if (state.search.trim()) bits.push('pencarian');
+    caption = 'Masuk/keluar mengikuti ' + bits.join(' + ') + '. Saldo tetap penuh.';
   }
 
   $('sum-masuk').textContent = rupiah(totalMasuk);
@@ -477,15 +452,13 @@ function render() {
   if (elLblS) elLblS.textContent = lblSisa;
   if (elCap) elCap.textContent = caption;
 
-  // Kartu ringkasan hanya saat Catatan + ada filter (hindari tumpukan dengan home-dash).
   const cards = $('filter-cards');
-  if (cards) {
-    const showCards = state.view === 'catatan' && filterBits.length > 0;
-    cards.classList.toggle('hidden', !showCards);
-  }
+  if (cards) cards.classList.toggle('hidden', !(state.view === 'catatan' && hasSoftFilter));
 
   const scopeBook = analitik && anaScopeId() ? state.books.find((b) => b.id === anaScopeId()) : null;
-  renderBookInfo({ analitik, book, scopeBook, saldoAwal: scopeSaldoAwal, txCount: scopeTx.length });
+  const monthYm = isYearMonth(state.month) ? state.month : todayISO().slice(0, 7);
+  const monthCount = (analitik ? scopeTx : state.transactions).filter((t) => t.tanggal.slice(0, 7) === monthYm).length;
+  renderBookInfo({ analitik, book, scopeBook, saldoAwal: scopeSaldoAwal, txCount: monthCount });
 
   const rows = visibleTx();
   renderColumn('masuk', rows.filter((t) => t.type === 'masuk'));
@@ -507,48 +480,46 @@ function bookSisa(book) {
   return (book.saldo_awal || 0) + masuk - keluar;
 }
 
-/** Ringkasan beranda: mengikuti bulan yang dipilih di filter. */
+/** Ringkasan beranda: saldo hidup + arus kas bulan terpilih. */
 function renderHomeDash() {
   const ym = isYearMonth(state.month) ? state.month : todayISO().slice(0, 7);
   const elLabel = $('home-month-label');
   if (elLabel) elLabel.textContent = labelBulan(ym);
-  const note = document.querySelector('.home-dash-note');
-  if (note) note.textContent = ym === todayISO().slice(0, 7)
-    ? 'Bulan kalender berjalan'
-    : 'Mengikuti bulan yang dipilih di filter';
-  const title = document.querySelector('.home-dash-title');
-  if (title) title.textContent = ym === todayISO().slice(0, 7) ? 'Arus Kas Bulan Ini' : 'Arus Kas Bulan Terpilih';
 
   const book = curBook();
+  const elSaldo = $('home-saldo');
+  if (elSaldo) elSaldo.textContent = rupiah(bookSisa(book));
+
   const tx = state.transactions.filter((t) => t.tanggal.slice(0, 7) === ym);
   const masuk = tx.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
   const keluar = tx.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
+  const net = masuk - keluar;
   $('home-masuk').textContent = rupiah(masuk);
   $('home-keluar').textContent = rupiah(keluar);
-  $('home-sisa').textContent = rupiah(masuk - keluar);
-
-  const recent = [...tx]
-    .sort((a, b) => (a.tanggal < b.tanggal ? 1 : a.tanggal > b.tanggal ? -1 : b.id - a.id))
-    .slice(0, 5);
-  const list = $('home-recent-list');
-  if (!list) return;
-  if (!recent.length) {
-    list.innerHTML = `<li class="home-recent-empty">Belum ada transaksi di ${escapeHtml(labelBulan(ym))}.</li>`;
-    return;
+  $('home-sisa').textContent = rupiah(net);
+  const netEl = $('home-sisa');
+  if (netEl) {
+    netEl.classList.toggle('is-neg', net < 0);
+    netEl.classList.toggle('is-pos', net > 0);
   }
-  list.innerHTML = recent.map((t) => {
-    const sign = t.type === 'masuk' ? '+' : '−';
-    const cls = t.type === 'masuk' ? 'in' : 'out';
-    const ket = escapeHtml(t.keterangan) || (t.type === 'masuk' ? 'Pemasukan' : 'Pengeluaran');
-    return `<li>
-      <span class="hr-date">${tanggalIndo(t.tanggal)}</span>
-      <span class="hr-ket">${ket}${t.kategori ? ` <span class="muted">· ${escapeHtml(t.kategori)}</span>` : ''}</span>
-      <span class="hr-amt ${cls}">${sign}${rupiah(t.jumlah)}</span>
-    </li>`;
-  }).join('');
 }
 
-/** Banner peringatan bila saldo rekening di bawah ambang — dihitung ulang dari transaksi. */
+function renderBookInfo({ analitik, book, scopeBook, saldoAwal, txCount }) {
+  const el = $('book-info');
+  if (!el) return;
+  // Satu baris meta — tanpa mengulang nama rekening (sudah di picker).
+  if (analitik && !scopeBook) {
+    el.textContent = `${state.books.length} rekening · saldo awal gabungan ${rupiah(saldoAwal)} · ${txCount} tx bulan ini`;
+  } else if (analitik && scopeBook) {
+    el.textContent = `Saldo awal ${rupiah(saldoAwal)} · ${txCount} tx bulan ini` +
+      (scopeBook.bank_info ? ` · ${scopeBook.bank_info}` : '');
+  } else {
+    el.textContent = `Saldo awal ${rupiah(saldoAwal)} · ${txCount} transaksi bulan ini` +
+      (book && book.bank_info ? ` · ${book.bank_info}` : '');
+  }
+}
+
+/** Banner peringatan bila saldo rekening di bawah ambang. */
 function renderLowBalanceAlert() {
   const el = $('low-balance-alert');
   if (!el) return;
@@ -560,25 +531,6 @@ function renderLowBalanceAlert() {
   el.innerHTML = `<strong>Saldo rendah</strong>` + low.map((b) =>
     `<div class="alert-item">${escapeHtml(b.name)}: saldo ${rupiah(b.sisaLive)} (ambang ${rupiah(b.ambang_saldo)})</div>`
   ).join('');
-}
-
-function renderBookInfo({ analitik, book, scopeBook, saldoAwal, txCount }) {
-  const parts = [];
-  if (analitik && !scopeBook) {
-    parts.push(`<span class="bi-name">Gabungan Semua Rekening</span>`);
-    parts.push(`<span class="bi-item"><b>${state.books.length}</b> rekening</span>`);
-    parts.push(`<span class="bi-item">Saldo Awal gabungan: <b>${rupiah(saldoAwal)}</b></span>`);
-  } else if (analitik && scopeBook) {
-    parts.push(`<span class="bi-name">Analitik: ${escapeHtml(scopeBook.name)}</span>`);
-    parts.push(`<span class="bi-item">Saldo Awal: <b>${rupiah(saldoAwal)}</b></span>`);
-    if (scopeBook.bank_info) parts.push(`<span class="bi-item">No. Rekening: <b>${escapeHtml(scopeBook.bank_info)}</b></span>`);
-  } else {
-    parts.push(`<span class="bi-name">${escapeHtml(book ? book.name : '')}</span>`);
-    parts.push(`<span class="bi-item">Saldo Awal: <b>${rupiah(saldoAwal)}</b></span>`);
-    if (book && book.bank_info) parts.push(`<span class="bi-item">No. Rekening: <b>${escapeHtml(book.bank_info)}</b></span>`);
-  }
-  parts.push(`<span class="bi-item">Jumlah transaksi: <b>${txCount}</b></span>`);
-  $('book-info').innerHTML = parts.join('');
 }
 
 function renderColumn(type, list) {
@@ -692,9 +644,9 @@ function setView(view) {
   $('tools-catatan').classList.toggle('hidden', view !== 'catatan');
   $('tools-besar').classList.toggle('hidden', view !== 'besar');
   $('tools-analitik').classList.toggle('hidden', view !== 'analitik');
-  // Analitik punya ringkasannya sendiri — sembunyikan beranda.
+  // Ringkasan beranda hanya di Catatan — Buku Besar & Analitik punya fokus sendiri.
   const home = $('home-dash');
-  if (home) home.classList.toggle('hidden', view === 'analitik');
+  if (home) home.classList.toggle('hidden', view !== 'catatan');
   const swipeHint = document.querySelector('.ledger-swipe-hint');
   if (swipeHint) swipeHint.classList.toggle('hidden', view !== 'catatan');
   // Buku Besar: pastikan rentang = bulan aktif (bukan seluruh periode).
@@ -1684,7 +1636,6 @@ function renderAnalytics() {
   renderBalanceChart(months);
   renderBreakdown('keluar', $('breakdown-keluar'));
   renderBreakdown('masuk', $('breakdown-masuk'));
-  // Pajak mengikuti bulan tampilan.
   state.taxMonth = ym;
   ensureTaxMonth();
   renderTaxSummary();
@@ -1719,19 +1670,13 @@ function renderTaxSummary() {
   const pph = Math.round(dpp * PPH_UMKM_RATE);
 
   box.innerHTML = `
-    <div class="tax-box"><div class="tb-label">DPP / Omzet (pemasukan)</div><div class="tb-value">${rupiah(dpp)}</div>
-      <div class="tb-note">${labelBulan(ym)}</div></div>
-    <div class="tax-box"><div class="tb-label">Total Pengeluaran</div><div class="tb-value">${rupiah(keluar)}</div></div>
-    <div class="tax-box"><div class="tb-label">Estimasi PPN Keluaran 11%</div><div class="tb-value">${rupiah(ppnKeluaran)}</div>
-      <div class="tb-note">11% × DPP</div></div>
-    <div class="tax-box"><div class="tb-label">PPN Masukan (kategori PPN)</div><div class="tb-value">${rupiah(ppnMasukan)}</div>
-      <div class="tb-note">Dari kategori berisi “PPN” / “Pajak Masuk”</div></div>
-    <div class="tax-box"><div class="tb-label">PPN Kurang / Lebih Bayar</div><div class="tb-value">${rupiah(ppnNet)}</div>
+    <div class="tax-box"><div class="tb-label">Omzet (DPP)</div><div class="tb-value">${rupiah(dpp)}</div></div>
+    <div class="tax-box"><div class="tb-label">PPN 11%</div><div class="tb-value">${rupiah(ppnKeluaran)}</div></div>
+    <div class="tax-box"><div class="tb-label">PPN masukan</div><div class="tb-value">${rupiah(ppnMasukan)}</div></div>
+    <div class="tax-box"><div class="tb-label">PPN kurang/lebih</div><div class="tb-value">${rupiah(ppnNet)}</div>
       <div class="tb-note">${ppnNet >= 0 ? 'Kurang bayar (perkiraan)' : 'Lebih bayar (perkiraan)'}</div></div>
-    <div class="tax-box"><div class="tb-label">Estimasi PPh Final 0,5%</div><div class="tb-value">${rupiah(pph)}</div>
-      <div class="tb-note">Skema UMKM — sesuaikan bila tarif berbeda</div></div>
-    <div class="tax-box wide"><div class="tb-label">Catatan</div>
-      <div class="tb-note">Angka ini ringkasan internal dari buku kas. Bukan SPT, bukan e-filing, dan tidak menggantikan perhitungan resmi konsultan pajak.</div></div>`;
+    <div class="tax-box"><div class="tb-label">PPh final 0,5%</div><div class="tb-value">${rupiah(pph)}</div></div>
+    <div class="tax-box"><div class="tb-label">Pengeluaran</div><div class="tb-value">${rupiah(keluar)}</div></div>`;
 }
 
 function renderRekeningSummary() {
@@ -1789,22 +1734,20 @@ function renderCompare() {
   }).join('');
 }
 function renderTiles(months) {
-  const m = months[0] || { masuk: 0, keluar: 0 };
-  const net = m.masuk - m.keluar;
   const ranged = anaTxInRange();
   let big = ranged[0];
   for (const t of ranged) if (t.jumlah > big.jumlah) big = t;
-  const bigSub = big
-    ? ((big.type === 'masuk' ? 'Pemasukan' : 'Pengeluaran') + (big.keterangan ? ' · ' + big.keterangan : ''))
-    : '—';
-  const tiles = [
-    { label: 'Total Pemasukan', value: rupiah(m.masuk), sub: labelBulan(resolveAnaRange().fromYm), cls: 'pos' },
-    { label: 'Total Pengeluaran', value: rupiah(m.keluar), sub: `${ranged.filter((t) => t.type === 'keluar').length} transaksi`, cls: 'neg' },
-    { label: 'Net bulan ini', value: rupiah(net), sub: net >= 0 ? 'surplus' : 'defisit', cls: net >= 0 ? 'pos' : 'neg' },
-    { label: 'Transaksi Terbesar', value: big ? rupiah(big.jumlah) : 'Rp0', sub: bigSub, cls: big && big.type === 'masuk' ? 'pos' : 'neg' },
-  ];
-  $('stat-tiles').innerHTML = tiles.map((t) =>
-    `<div class="tile"><span class="tile-label">${t.label}</span><span class="tile-value ${t.cls}">${t.value}</span><span class="tile-sub">${escapeHtml(t.sub)}</span></div>`).join('');
+  if (!big) {
+    $('stat-tiles').innerHTML = '';
+    return;
+  }
+  const sub = (big.type === 'masuk' ? 'Pemasukan' : 'Pengeluaran') +
+    (big.keterangan ? ' · ' + big.keterangan : '') +
+    ` · ${tanggalIndo(big.tanggal)}`;
+  $('stat-tiles').innerHTML =
+    `<div class="tile tile-highlight"><span class="tile-label">Transaksi terbesar bulan ini</span>` +
+    `<span class="tile-value ${big.type === 'masuk' ? 'pos' : 'neg'}">${rupiah(big.jumlah)}</span>` +
+    `<span class="tile-sub">${escapeHtml(sub)}</span></div>`;
 }
 function renderMonthlyChart(months) {
   if (!months.length) { $('chart-monthly').innerHTML = '<p class="breakdown-empty">Belum ada data periode.</p>'; return; }
