@@ -5,7 +5,7 @@
    Frontend tanpa bundler — ES modules native (script type="module").
    Modul murni: js/format.js (formatter), js/csv.js (impor), js/ledger.js (saldo berjalan).
    ============================================================ */
-import { rupiah, BULAN_S, tanggalIndo, tanggalRelatif, labelBulan, todayISO, escapeHtml, slug, csvCell, downloadBlob, isYearMonth, shiftMonth, monthsBetween } from './js/format.js';
+import { rupiah, BULAN_S, tanggalIndo, labelBulan, todayISO, escapeHtml, slug, csvCell, downloadBlob, isYearMonth, shiftMonth, monthsBetween } from './js/format.js';
 import { parseCsv, rowsToTransactions } from './js/csv.js';
 import { computeLedger } from './js/ledger.js';
 
@@ -480,7 +480,7 @@ function bookSisa(book) {
   return (book.saldo_awal || 0) + masuk - keluar;
 }
 
-/** Ringkasan beranda: saldo hidup + arus kas bulan terpilih + konteks vs bulan lalu. */
+/** Ringkasan beranda: saldo hidup + arus kas bulan terpilih. */
 function renderHomeDash() {
   const ym = isYearMonth(state.month) ? state.month : todayISO().slice(0, 7);
   const elLabel = $('home-month-label');
@@ -490,42 +490,17 @@ function renderHomeDash() {
   const elSaldo = $('home-saldo');
   if (elSaldo) elSaldo.textContent = rupiah(bookSisa(book));
 
-  const monthAgg = (monthYm) => {
-    let masuk = 0, keluar = 0;
-    for (const t of state.transactions) {
-      if (t.tanggal.slice(0, 7) !== monthYm) continue;
-      if (t.type === 'masuk') masuk += t.jumlah; else keluar += t.jumlah;
-    }
-    return { masuk, keluar, net: masuk - keluar };
-  };
-  const cur = monthAgg(ym);
-  const prevYm = shiftMonth(ym, -1);
-  const prev = monthAgg(prevYm);
-  const diff = cur.net - prev.net;
-
-  $('home-masuk').textContent = rupiah(cur.masuk);
-  $('home-keluar').textContent = rupiah(cur.keluar);
-  $('home-sisa').textContent = rupiah(cur.net);
+  const tx = state.transactions.filter((t) => t.tanggal.slice(0, 7) === ym);
+  const masuk = tx.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
+  const keluar = tx.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
+  const net = masuk - keluar;
+  $('home-masuk').textContent = rupiah(masuk);
+  $('home-keluar').textContent = rupiah(keluar);
+  $('home-sisa').textContent = rupiah(net);
   const netEl = $('home-sisa');
   if (netEl) {
-    netEl.classList.toggle('is-neg', cur.net < 0);
-    netEl.classList.toggle('is-pos', cur.net > 0);
-  }
-
-  const deltaEl = $('home-delta');
-  if (deltaEl) {
-    const sign = diff > 0 ? '+' : diff < 0 ? '−' : '';
-    const pct = prev.net !== 0
-      ? Math.round((diff / Math.abs(prev.net)) * 100)
-      : (cur.net !== 0 ? 100 : 0);
-    const pctBit = prev.net !== 0 || cur.net !== 0
-      ? ` (${sign}${Math.abs(pct)}%)`
-      : '';
-    const cls = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
-    deltaEl.className = 'home-balance-delta ' + cls;
-    deltaEl.textContent = diff === 0 && prev.net === 0 && cur.net === 0
-      ? `Belum ada arus kas · banding ${labelBulan(prevYm)}`
-      : `Selisih vs ${labelBulan(prevYm)} · ${sign}${rupiah(Math.abs(diff))}${pctBit}`;
+    netEl.classList.toggle('is-neg', net < 0);
+    netEl.classList.toggle('is-pos', net > 0);
   }
 }
 
@@ -572,22 +547,14 @@ function renderColumn(type, list) {
   } else {
     list.forEach((t, i) => {
       const tr = document.createElement('tr');
-      const tglFull = tanggalIndo(t.tanggal);
-      const tglLabel = tanggalRelatif(t.tanggal);
-      const kat = t.kategori
-        ? ` <span class="kat-chip">${escapeHtml(t.kategori)}</span>`
-        : '';
-      const bukti = t.has_bukti
-        ? ` <button type="button" class="bukti-chip" data-bukti="${t.id}" title="Lihat bukti">bukti</button>`
-        : '';
       tr.innerHTML = `
         <td class="c-no">${i + 1}</td>
-        <td class="c-date"><time datetime="${escapeHtml(t.tanggal)}" title="${escapeHtml(tglFull)}">${escapeHtml(tglLabel)}</time></td>
+        <td class="c-date">${tanggalIndo(t.tanggal)}</td>
         <td class="c-amt">${rupiah(t.jumlah)}</td>
-        <td class="c-ket"><span class="ket-text">${escapeHtml(t.keterangan) || '<span class="muted">—</span>'}</span>${kat}${bukti}</td>
+        <td class="c-ket">${escapeHtml(t.keterangan) || '<span class="muted">—</span>'}${t.kategori ? ` <span class="muted">· ${escapeHtml(t.kategori)}</span>` : ''}${t.has_bukti ? ` <button type="button" class="bukti-chip" data-bukti="${t.id}" title="Lihat bukti">bukti</button>` : ''}</td>
         <td class="c-act"><div class="row-actions">${isAdmin() ? `
-          <button class="icon-btn" title="Ubah" aria-label="Ubah transaksi ${tglFull} ${rupiah(t.jumlah)}" data-edit="${t.id}">Ubah</button>
-          <button class="icon-btn" title="Hapus" aria-label="Hapus transaksi ${tglFull} ${rupiah(t.jumlah)}" data-del="${t.id}">Hapus</button>` : ''}
+          <button class="icon-btn" title="Ubah" aria-label="Ubah transaksi ${tanggalIndo(t.tanggal)} ${rupiah(t.jumlah)}" data-edit="${t.id}">Ubah</button>
+          <button class="icon-btn" title="Hapus" aria-label="Hapus transaksi ${tanggalIndo(t.tanggal)} ${rupiah(t.jumlah)}" data-del="${t.id}">Hapus</button>` : ''}
         </div></td>`;
       tbody.appendChild(tr);
     });
