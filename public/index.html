@@ -85,7 +85,7 @@
           <div class="home-dash-head">
             <div>
               <h2 class="home-dash-title">Arus Kas Bulan Ini</h2>
-              <p class="home-dash-note">Tidak mengikuti filter Catatan di bawah</p>
+              <p class="home-dash-note">Mengikuti bulan yang dipilih</p>
             </div>
             <span class="home-dash-month" id="home-month-label"></span>
           </div>
@@ -138,7 +138,7 @@
           <div class="tool-filters" id="tools-catatan">
             <label class="field-inline">
               <span>Bulan</span>
-              <select id="month-filter"><option value="">Semua</option></select>
+              <select id="month-filter"></select>
             </label>
             <button type="button" id="add-month-btn" class="btn btn-ghost btn-sm" title="Tambah bulan (termasuk bulan ke depan) ke filter">+ Bulan</button>
             <input id="add-month-picker" type="month" class="sr-only" tabindex="-1" aria-hidden="true" />
@@ -155,24 +155,15 @@
           <div class="tool-filters hidden" id="tools-besar">
             <label class="field-inline"><span>Dari</span><input id="besar-from" type="date" /></label>
             <label class="field-inline"><span>Sampai</span><input id="besar-to" type="date" /></label>
-            <button id="besar-reset" class="btn btn-ghost btn-sm">Semua</button>
+            <button id="besar-reset" class="btn btn-ghost btn-sm" title="Kembali ke bulan tampilan">Reset bulan</button>
           </div>
 
           <div class="tool-filters hidden" id="tools-analitik">
             <label class="field-inline"><span>Scope</span>
               <select id="ana-scope"><option value="">Gabungan (Semua Rekening)</option></select>
             </label>
-            <label class="field-inline"><span>Periode</span>
-              <select id="ana-range">
-                <option value="12">12 bulan</option>
-                <option value="6">6 bulan</option>
-                <option value="all">Semua</option>
-                <option value="custom">Kustom</option>
-              </select>
-            </label>
-            <label class="ana-custom hidden" id="ana-custom-wrap">
-              <span>Dari</span><input id="ana-from" type="month" />
-              <span>Sampai</span><input id="ana-to" type="month" />
+            <label class="field-inline"><span>Bulan</span>
+              <select id="ana-month"></select>
             </label>
           </div>
 
@@ -263,7 +254,7 @@
             <div class="ana-block">
               <header class="ana-block-head">
                 <h3 class="ana-block-title">Posisi Rekening</h3>
-                <p class="ana-block-sub">Saldo hidup per rekening (semua periode)</p>
+                <p class="ana-block-sub ana-period-label">Aktivitas bulan terpilih</p>
               </header>
               <div id="rekening-summary" class="rek-summary"></div>
             </div>
@@ -272,7 +263,7 @@
             <div class="ana-block">
               <header class="ana-block-head">
                 <h3 class="ana-block-title">Tren</h3>
-                <p class="ana-block-sub ana-period-label">Arus kas dan saldo akumulasi per bulan</p>
+                <p class="ana-block-sub ana-period-label">Arus kas bulan terpilih</p>
               </header>
               <div class="ana-charts">
                 <div class="ana-chart">
@@ -296,7 +287,7 @@
             <div class="ana-block">
               <header class="ana-block-head">
                 <h3 class="ana-block-title">Komposisi Kategori</h3>
-                <p class="ana-block-sub ana-period-label">Proporsi sepanjang periode terpilih</p>
+                <p class="ana-block-sub ana-period-label">Proporsi bulan terpilih</p>
               </header>
               <div class="chart-grid">
                 <div class="ana-panel">
