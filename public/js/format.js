@@ -9,6 +9,19 @@ export function tanggalIndo(iso) {
   const [y, m, d] = iso.split('-');
   return `${d} ${BULAN_S[Number(m) - 1]} ${y}`;
 }
+
+/** Label tanggal ringkas: "Hari ini" / "Kemarin" / tanggal Indo penuh. */
+export function tanggalRelatif(iso, today = todayISO()) {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return tanggalIndo(iso || '');
+  if (iso === today) return 'Hari ini';
+  const [y, m, d] = today.split('-').map(Number);
+  const prev = new Date(y, m - 1, d);
+  prev.setDate(prev.getDate() - 1);
+  const yest = `${prev.getFullYear()}-${pad2(prev.getMonth() + 1)}-${pad2(prev.getDate())}`;
+  if (iso === yest) return 'Kemarin';
+  return tanggalIndo(iso);
+}
+
 export function labelBulan(ym) { const [y, m] = ym.split('-'); return `${BULAN[Number(m) - 1]} ${y}`; }
 export function todayISO() {
   const d = new Date();
