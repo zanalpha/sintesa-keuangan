@@ -11,7 +11,9 @@
     "test": "node --test",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "backup": "node scripts/backup-to-folder.js",
+    "restore": "node scripts/restore-from-folder.js"
   },
   "engines": {
     "node": ">=18"

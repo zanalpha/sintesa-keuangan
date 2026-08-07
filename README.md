@@ -128,16 +128,24 @@ Butuh **Node ≥ 18**. Test & lint juga berjalan otomatis di GitHub Actions (`.g
 
 ## Backup & pemulihan data
 
-Tiga lapis pengaman:
+Empat lapis pengaman (supaya kejadian DB suspended tidak menghilangkan data):
 
-1. **Cadangkan manual** — menu **☰ → Cadangkan data (JSON)**. Berkas berisi semua rekening + transaksi **+ bukti lampiran** (format v2).
-2. **Pulihkan** — menu **☰ → Pulihkan dari cadangan**, pilih file JSON. ⚠️ Menimpa seluruh data saat ini.
-3. **Cadangan otomatis harian (off-site)** — GitHub Actions (`.github/workflows/backup.yml`) menjalankan `pg_dump`, mengompresi, lalu **mengenkripsi AES-256-CBC (PBKDF2)** sebelum diunggah sebagai artifact (retensi 30 hari).
-   Aktifkan dengan menambah secrets di repo: **Settings → Secrets and variables → Actions**:
-   - `DATABASE_URL` — Database URL dari Render
-   - `BACKUP_ENCRYPTION_KEY` — passphrase kuat (jangan dibagikan / di-commit)
+1. **Folder lokal `backups/`** — salinan JSON di laptop Anda (tidak di-commit ke Git):
 
-   Dekripsi lokal (ganti nama berkas sesuai artifact):
+   ```bash
+   # .env: ADMIN_USER, ADMIN_PASSWORD, dan BACKUP_URL=https://sintesa-keuangan.onrender.com
+   npm run backup
+   ```
+
+   Hasil: `backups/backup-sintesa-keuangan-YYYYMMDD-HHMMSS.json` + `backups/latest.json` (maks. 30 file, yang lama dihapus otomatis).  
+   Pulihkan: `npm run restore -- --replace` (atau `node scripts/restore-from-folder.js backups/latest.json --replace`).
+
+2. **Cadangkan manual di browser** — menu **☰ → Cadangkan data (JSON)** (format v2 + bukti).
+3. **Pulihkan di browser** — menu **☰ → Pulihkan dari cadangan**. ⚠️ Menimpa data saat ini.
+4. **Cadangan otomatis harian (GitHub Actions)** — `pg_dump` → gzip → AES-256 → artifact (retensi 30 hari).  
+   Secrets wajib: `DATABASE_URL` (External URL Postgres Render) + `BACKUP_ENCRYPTION_KEY`.
+
+   Dekripsi lokal:
 
    ```bash
    openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:'YOUR_KEY' \
@@ -146,7 +154,7 @@ Tiga lapis pengaman:
    gunzip -c sintesa-backup.sql.gz | psql "$DATABASE_URL"
    ```
 
-> Postgres **paket gratis Render kedaluwarsa** setelah beberapa waktu. Untuk data serius, ubah `plan: free` → `plan: basic` di `render.yaml` agar tidak kedaluwarsa dan mendapat backup terkelola. Cadangan otomatis di atas tetap disarankan sebagai salinan off-site.
+> Pakai plan **berbayar** untuk Postgres (bukan free). Blueprint `render.yaml` memakai `plan: basic` (DB) dan `starter` (web). Salin juga `backups/latest.json` ke Drive/USB secara berkala.
 
 ## Keamanan
 

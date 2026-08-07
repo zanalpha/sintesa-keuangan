@@ -5,14 +5,16 @@ databases:
   - name: sintesa-keuangan-db
     databaseName: sintesa_keuangan
     user: sintesa
-    plan: free # ganti ke "basic" untuk produksi jangka panjang (free Postgres kedaluwarsa)
+    # basic: tidak kedaluwarsa seperti free; wajib untuk data produksi
+    plan: basic
     region: singapore # terdekat dari Indonesia
 
 services:
   - type: web
     name: sintesa-keuangan
     runtime: node
-    plan: free # ganti ke "starter" agar tidak "tidur" saat tidak dipakai
+    # starter: mengurangi cold start vs free
+    plan: starter
     region: singapore
     buildCommand: npm ci
     startCommand: npm start

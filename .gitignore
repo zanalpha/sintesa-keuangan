@@ -4,3 +4,10 @@ node_modules/
 *.log
 .DS_Store
 data.local.json
+
+# Cadangan DB lokal — jangan commit (data sensitif + bisa besar)
+backups/*.json
+backups/*.sql
+backups/*.sql.gz
+backups/*.enc
+!backups/README.md
