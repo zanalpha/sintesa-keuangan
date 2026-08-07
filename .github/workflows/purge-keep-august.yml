@@ -1,0 +1,57 @@
+name: Purge — pertahankan Agustus saja
+
+# Hard-delete transaksi di luar Agustus (termasuk Juli + soft-deleted), lalu VACUUM.
+# Pakai secret DATABASE_URL (sama dengan workflow Cadangan DB).
+#
+# Settings → Secrets → Actions: DATABASE_URL wajib terisi.
+# Jalankan: Actions → "Purge — pertahankan Agustus saja" → Run workflow
+#   mode=dry-run  → hitung saja, tidak menghapus
+#   mode=confirm  → hapus permanen
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry-run = hitung saja; confirm = hapus permanen'
+        required: true
+        type: choice
+        options:
+          - dry-run
+          - confirm
+        default: dry-run
+      year:
+        description: 'Tahun Agustus yang dipertahankan'
+        required: true
+        type: string
+        default: '2026'
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --omit=dev
+
+      - name: Jalankan purge-keep-august
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Secret DATABASE_URL belum diisi di repo."
+            exit 1
+          fi
+          MODE="${{ inputs.mode }}"
+          YEAR="${{ inputs.year }}"
+          if [ "$MODE" = "confirm" ]; then
+            echo "::warning::CONFIRM — hard-delete semua transaksi di luar Agustus $YEAR"
+            node scripts/purge-keep-august.js --confirm --year="$YEAR"
+          else
+            node scripts/purge-keep-august.js --dry-run --year="$YEAR"
+          fi
