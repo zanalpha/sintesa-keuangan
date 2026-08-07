@@ -96,6 +96,7 @@ async function backupViaPg(url) {
     ssl: /localhost|127\.0\.0\.1/.test(url) ? false : { rejectUnauthorized: false },
   });
   await client.connect();
+  // tanggal::text agar tidak digeser timezone oleh driver Date (UTC).
   const books = (
     await client.query(
       `SELECT id, name, saldo_awal, bank_info, ambang_saldo, created_at
@@ -111,13 +112,16 @@ async function backupViaPg(url) {
   let lastId = 0;
   for (;;) {
     const { rows } = await client.query(
-      `SELECT id, book_id, type, tanggal, jumlah, keterangan, kategori, bukti, created_at
+      `SELECT id, book_id, type, tanggal::text AS tanggal, jumlah, keterangan, kategori, bukti, created_at
          FROM transactions WHERE deleted_at IS NULL AND id > $1
          ORDER BY id LIMIT 200`,
       [lastId]
     );
     if (!rows.length) break;
-    for (const t of rows) txs.push({ ...t, jumlah: Number(t.jumlah) });
+    for (const t of rows) {
+      const tanggal = String(t.tanggal || '').slice(0, 10);
+      txs.push({ ...t, tanggal, jumlah: Number(t.jumlah) });
+    }
     lastId = rows[rows.length - 1].id;
     if (rows.length < 200) break;
   }
