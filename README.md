@@ -128,7 +128,7 @@ Butuh **Node ≥ 18**. Test & lint juga berjalan otomatis di GitHub Actions (`.g
 
 ## Backup & pemulihan data
 
-Empat lapis pengaman (supaya kejadian DB suspended tidak menghilangkan data):
+Lima lapis pengaman (supaya kejadian DB suspended tidak menghilangkan data):
 
 1. **Folder lokal `backups/`** — salinan JSON di laptop Anda (tidak di-commit ke Git):
 
@@ -142,14 +142,17 @@ Empat lapis pengaman (supaya kejadian DB suspended tidak menghilangkan data):
 
 2. **Cadangkan manual di browser** — menu **☰ → Cadangkan data (JSON)** (format v2 + bukti).
 3. **Pulihkan di browser** — menu **☰ → Pulihkan dari cadangan**. ⚠️ Menimpa data saat ini.
-4. **Cadangan otomatis harian (GitHub Actions)** — `pg_dump` → gzip → AES-256 → artifact (retensi 30 hari).  
-   Secrets wajib: `DATABASE_URL` (External URL Postgres Render) + `BACKUP_ENCRYPTION_KEY`.
+4. **Repo GitHub privat** — [zanalpha/sintesa-keuangan-backups](https://github.com/zanalpha/sintesa-keuangan-backups) (hanya Anda).  
+   Workflow harian commit file `dumps/*.sql.gz.enc` (AES-256).  
+   Secrets di **repo privat** itu: `DATABASE_URL` + `BACKUP_ENCRYPTION_KEY`.  
+   Opsional di repo app ini: secret `BACKUP_REPO_TOKEN` (PAT) agar workflow publik ikut mendorong ke repo privat.
+5. **Artifact Actions** (repo app, retensi 30 hari) — sama-sama file `.enc`.
 
    Dekripsi lokal:
 
    ```bash
    openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:'YOUR_KEY' \
-     -in sintesa-backup-YYYYMMDD-HHMMSS.sql.gz.enc \
+     -in dumps/latest.sql.gz.enc \
      -out sintesa-backup.sql.gz
    gunzip -c sintesa-backup.sql.gz | psql "$DATABASE_URL"
    ```

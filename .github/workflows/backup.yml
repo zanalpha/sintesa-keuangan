@@ -1,14 +1,16 @@
 name: Cadangan DB Harian
 
-# Backup off-site otomatis: pg_dump database Render setiap hari, dienkripsi AES-256,
-# disimpan sebagai artifact GitHub (retensi 30 hari).
+# 1) Artifact Actions (retensi 30 hari)
+# 2) Push ke repo privat zanalpha/sintesa-keuangan-backups (jika BACKUP_REPO_TOKEN ada)
 #
-# Secrets yang WAJIB diisi di repo (Settings → Secrets and variables → Actions):
-#   DATABASE_URL            — Internal/External Database URL dari Render
-#   BACKUP_ENCRYPTION_KEY   — passphrase kuat untuk enkripsi dump (jangan commit)
+# Secrets (repo aplikasi — Settings → Secrets → Actions):
+#   DATABASE_URL            — External Database URL Render
+#   BACKUP_ENCRYPTION_KEY   — passphrase AES (sama dengan di repo privat)
+#   BACKUP_REPO_TOKEN       — PAT klasik/fine-grained: Contents R/W ke repo privat backups
+#                            (opsional bila cadangan harian hanya dijalankan di repo privat)
 on:
   schedule:
-    - cron: '0 19 * * *' # 19:00 UTC = 02:00 WIB setiap hari
+    - cron: '0 19 * * *' # 02:00 WIB
   workflow_dispatch: {}
 
 jobs:
@@ -27,9 +29,11 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
         run: |
-          if [ -z "$DATABASE_URL" ]; then echo "Secret DATABASE_URL belum diisi."; exit 1; fi
-          if [ -z "$BACKUP_ENCRYPTION_KEY" ]; then echo "Secret BACKUP_ENCRYPTION_KEY belum diisi."; exit 1; fi
+          set -euo pipefail
+          if [ -z "${DATABASE_URL:-}" ]; then echo "::error::Secret DATABASE_URL belum diisi."; exit 1; fi
+          if [ -z "${BACKUP_ENCRYPTION_KEY:-}" ]; then echo "::error::Secret BACKUP_ENCRYPTION_KEY belum diisi."; exit 1; fi
           ts=$(date -u +%Y%m%d-%H%M%S)
+          echo "TS=$ts" >> "$GITHUB_ENV"
           plain="sintesa-backup-$ts.sql.gz"
           enc="${plain}.enc"
           /usr/lib/postgresql/16/bin/pg_dump "$DATABASE_URL" | gzip > "$plain"
@@ -43,3 +47,25 @@ jobs:
           name: sintesa-db-backup-${{ github.run_id }}
           path: sintesa-backup-*.sql.gz.enc
           retention-days: 30
+
+      - name: Push ke GitHub privat (sintesa-keuangan-backups)
+        env:
+          TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TOKEN:-}" ]; then
+            echo "BACKUP_REPO_TOKEN kosong — lewati push ke repo privat (cadangan tetap di artifact / jalankan workflow di repo privat)."
+            exit 0
+          fi
+          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/zanalpha/sintesa-keuangan-backups.git" bakrepo
+          mkdir -p bakrepo/dumps
+          cp sintesa-backup-*.sql.gz.enc bakrepo/dumps/
+          cp "sintesa-backup-${TS}.sql.gz.enc" bakrepo/dumps/latest.sql.gz.enc
+          cd bakrepo
+          ls -1t dumps/sintesa-backup-*.sql.gz.enc 2>/dev/null | tail -n +61 | xargs -r rm -f
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dumps/
+          if git diff --staged --quiet; then echo "Tidak ada perubahan."; exit 0; fi
+          git commit -m "Cadangan otomatis ${TS} (dari sintesa-keuangan)"
+          git push

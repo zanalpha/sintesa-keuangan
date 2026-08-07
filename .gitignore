@@ -10,4 +10,7 @@ backups/*.json
 backups/*.sql
 backups/*.sql.gz
 backups/*.enc
+backups/.encryption-key.local
+backups/PRIVATE_REPO_README.md
+backups/private-repo-backup.yml
 !backups/README.md
