@@ -37,7 +37,7 @@ function req(method, path, { body, cookie } = {}) {
         let json = null;
         try { json = raw ? JSON.parse(raw) : null; } catch (_) { /* non-JSON */ }
         const sc = res.headers['set-cookie'] || [];
-        resolve({ status: res.statusCode, json, cookie: sc.map((c) => c.split(';')[0]).join('; ') });
+        resolve({ status: res.statusCode, json, headers: res.headers, cookie: sc.map((c) => c.split(';')[0]).join('; ') });
       });
     });
     r.on('error', reject);
@@ -165,4 +165,27 @@ test('audit log mencatat aktivitas', async () => {
   const r = await req('GET', '/api/auth/audit', { cookie: adminCookie });
   assert.equal(r.status, 200);
   assert.ok(r.json.events.length > 0);
+});
+
+test('respons /api memakai Cache-Control no-store (data keuangan tak di-cache)', async () => {
+  const r = await req('GET', '/api/books', { cookie: adminCookie });
+  assert.match(String(r.headers['cache-control'] || ''), /no-store/);
+});
+
+test('CSP menyertakan object-src none', async () => {
+  const r = await req('GET', '/healthz');
+  assert.match(String(r.headers['content-security-policy'] || ''), /object-src 'none'/);
+});
+
+test('daftar pengguna hanya untuk admin (viewer 403)', async () => {
+  assert.equal((await req('GET', '/api/auth/users', { cookie: viewerCookie })).status, 403);
+  assert.equal((await req('GET', '/api/auth/users', { cookie: adminCookie })).status, 200);
+});
+
+test('login: username tak dikenal & password salah beri pesan sama (anti-enumerasi)', async () => {
+  const a = await req('POST', '/api/auth/login', { body: { username: 'tidakada_zzz', password: 'apa sajakah' } });
+  const b = await req('POST', '/api/auth/login', { body: { username: 'admin', password: 'passwordSALAH123' } });
+  assert.equal(a.status, 401);
+  assert.equal(b.status, 401);
+  assert.equal(a.json.error, b.json.error); // pesan identik -> tak membocorkan keberadaan akun
 });
