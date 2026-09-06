@@ -1062,6 +1062,102 @@ async function openAudit() {
   } catch (err) { toast(err.message, true); }
 }
 
+// ---------- Hapus bulan (hard delete) ----------
+let purgeMonthCache = [];
+
+function updatePurgeMonthPreview() {
+  const ym = $('purge-month-select').value;
+  const hint = $('purge-month-confirm-hint');
+  const statsEl = $('purge-month-stats');
+  const confirm = $('purge-month-confirm');
+  const submit = $('purge-month-submit');
+  hint.textContent = ym || 'YYYY-MM';
+  confirm.placeholder = ym || '2026-08';
+  if (!ym) {
+    statsEl.textContent = '';
+    submit.disabled = true;
+    return;
+  }
+  const m = purgeMonthCache.find((x) => x.month === ym);
+  if (!m) {
+    statsEl.textContent = '';
+    submit.disabled = confirm.value.trim() !== ym;
+    return;
+  }
+  statsEl.textContent =
+    `${labelBulan(ym)}: ${m.total} transaksi` +
+    ` (${m.aktif} aktif` +
+    (m.soft_deleted ? `, ${m.soft_deleted} diarsipkan` : '') +
+    `) · masuk ${rupiah(m.masuk_sum)} / keluar ${rupiah(m.keluar_sum)}`;
+  submit.disabled = confirm.value.trim() !== ym;
+}
+
+async function openPurgeMonth() {
+  if (!isAdmin()) return;
+  closeMenu();
+  lastFocused = document.activeElement;
+  $('purge-month-error').textContent = '';
+  $('purge-month-confirm').value = '';
+  $('purge-month-stats').textContent = 'Memuat…';
+  $('purge-month-submit').disabled = true;
+  try {
+    const { months } = await api('GET', '/api/months');
+    purgeMonthCache = months || [];
+    const sel = $('purge-month-select');
+    sel.innerHTML = '<option value="">— pilih bulan —</option>' +
+      purgeMonthCache.map((m) =>
+        `<option value="${escapeHtml(m.month)}">${escapeHtml(labelBulan(m.month))} (${m.total} tx)</option>`
+      ).join('');
+    if (state.month && purgeMonthCache.some((m) => m.month === state.month)) {
+      sel.value = state.month;
+    }
+    updatePurgeMonthPreview();
+    $('purge-month-modal').classList.remove('hidden');
+    setTimeout(() => sel.focus(), 50);
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+$('purge-month-select').addEventListener('change', () => {
+  $('purge-month-confirm').value = '';
+  $('purge-month-error').textContent = '';
+  updatePurgeMonthPreview();
+});
+$('purge-month-confirm').addEventListener('input', updatePurgeMonthPreview);
+$('purge-month-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!isAdmin()) return;
+  const month = $('purge-month-select').value.trim();
+  const confirmVal = $('purge-month-confirm').value.trim();
+  $('purge-month-error').textContent = '';
+  if (!month || !isYearMonth(month)) {
+    $('purge-month-error').textContent = 'Pilih bulan yang valid (YYYY-MM).';
+    return;
+  }
+  if (confirmVal !== month) {
+    $('purge-month-error').textContent = `Ketik ${month} untuk konfirmasi.`;
+    return;
+  }
+  const m = purgeMonthCache.find((x) => x.month === month);
+  const n = m ? m.total : '?';
+  if (!confirm(
+    `HAPUS PERMANEN ${n} transaksi bulan ${labelBulan(month)}?\n\n` +
+    'Termasuk data diarsipkan dan bukti. Tidak bisa dibatalkan (kecuali pulihkan dari cadangan JSON).'
+  )) return;
+  const submit = $('purge-month-submit');
+  submit.disabled = true;
+  try {
+    const res = await api('POST', '/api/purge-month', { month, confirm: confirmVal });
+    closeModals();
+    toast(`Bulan ${labelBulan(month)} dihapus (${res.deleted} transaksi).`);
+    await loadData();
+  } catch (err) {
+    $('purge-month-error').textContent = err.message;
+    updatePurgeMonthPreview();
+  }
+});
+
 // ============================================================
 //  IMPOR CSV
 // ============================================================
@@ -1325,7 +1421,7 @@ let lastFocused = null;
 let modalDirty = false;
 
 function closeModals() {
-  ['tx-modal', 'book-modal', 'import-modal', 'users-modal', 'password-modal', 'transfer-modal', 'audit-modal', 'company-modal'].forEach((id) => $(id).classList.add('hidden'));
+  ['tx-modal', 'book-modal', 'import-modal', 'users-modal', 'password-modal', 'transfer-modal', 'audit-modal', 'company-modal', 'purge-month-modal'].forEach((id) => $(id).classList.add('hidden'));
   modalDirty = false;
   if (lastFocused && typeof lastFocused.focus === 'function') {
     try { lastFocused.focus(); } catch (_) {}
@@ -1465,6 +1561,7 @@ function wireStaticHandlers() {
   $('password-btn').addEventListener('click', openPassword);
   $('backup-btn').addEventListener('click', backupData);
   $('restore-btn').addEventListener('click', openRestore);
+  $('purge-month-btn').addEventListener('click', openPurgeMonth);
   $('audit-btn').addEventListener('click', openAudit);
   $('logout-btn').addEventListener('click', async () => { await api('POST', '/api/auth/logout'); location.reload(); });
 

@@ -13,7 +13,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "backup": "node scripts/backup-to-folder.js",
-    "restore": "node scripts/restore-from-folder.js"
+    "restore": "node scripts/restore-from-folder.js",
+    "purge-month": "node scripts/purge-month.js"
   },
   "engines": {
     "node": ">=18"

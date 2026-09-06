@@ -44,8 +44,9 @@ function validDate(s) {
 
 // Rentang tanggal untuk filter bulan "YYYY-MM" -> [awal, awalBulanBerikutnya)
 function monthRange(month) {
-  if (!/^\d{4}-\d{2}$/.test(month)) return null;
+  if (typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month)) return null;
   const [y, m] = month.split('-').map(Number);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || m < 1 || m > 12 || y < 2000 || y > 2100) return null;
   const start = `${month}-01`;
   const nextY = m === 12 ? y + 1 : y;
   const nextM = m === 12 ? 1 : m + 1;
@@ -517,6 +518,160 @@ router.get('/transactions/:id/bukti', async (req, res, next) => {
     if (!rows[0].bukti) return res.status(404).json({ error: 'Tidak ada bukti untuk transaksi ini.' });
     res.json({ bukti: rows[0].bukti });
   } catch (e) {
+    next(e);
+  }
+});
+
+// ---------- RINGKASAN PER BULAN (admin) ----------
+// Dipakai UI "Hapus bulan" agar admin melihat jumlah baris sebelum menghapus permanen.
+/** Normalisasi nilai tanggal (DATE/string/Date) ke "YYYY-MM". */
+function yearMonthOf(tanggal) {
+  if (tanggal instanceof Date && !Number.isNaN(tanggal.getTime())) {
+    const y = tanggal.getUTCFullYear();
+    const m = String(tanggal.getUTCMonth() + 1).padStart(2, '0');
+    return `${y}-${m}`;
+  }
+  const s = String(tanggal == null ? '' : tanggal).slice(0, 10);
+  return /^\d{4}-\d{2}/.test(s) ? s.slice(0, 7) : '';
+}
+
+router.get('/months', requireAdmin, async (req, res, next) => {
+  try {
+    // Agregasi di JS agar kompatibel pg-mem (tanpa to_char) dan volume transaksi tipikal kecil.
+    const { rows } = await query(
+      `SELECT tanggal, type, jumlah, deleted_at, bukti FROM transactions`
+    );
+    const map = new Map();
+    for (const r of rows) {
+      const month = yearMonthOf(r.tanggal);
+      if (!month) continue;
+      let bucket = map.get(month);
+      if (!bucket) {
+        bucket = {
+          month,
+          total: 0,
+          aktif: 0,
+          soft_deleted: 0,
+          masuk_n: 0,
+          masuk_sum: 0,
+          keluar_n: 0,
+          keluar_sum: 0,
+        };
+        map.set(month, bucket);
+      }
+      bucket.total += 1;
+      const soft = r.deleted_at != null;
+      if (soft) bucket.soft_deleted += 1;
+      else {
+        bucket.aktif += 1;
+        const j = num(r.jumlah);
+        if (r.type === 'masuk') {
+          bucket.masuk_n += 1;
+          bucket.masuk_sum += j;
+        } else if (r.type === 'keluar') {
+          bucket.keluar_n += 1;
+          bucket.keluar_sum += j;
+        }
+      }
+    }
+    const months = [...map.values()].sort((a, b) => (a.month < b.month ? 1 : -1));
+    res.json({ months });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Soft-delete UI TIDAK menghemat ruang (bukti/blob tetap). Hard-delete permanen semua
+// transaksi (aktif + soft-deleted) dalam bulan YYYY-MM. VACUUM tidak di HTTP — pakai CLI.
+async function hardDeleteMonth(month, user) {
+  const range = monthRange(month);
+  if (!range) {
+    const err = new Error('Bulan tidak valid. Gunakan format YYYY-MM (contoh 2026-08).');
+    err.status = 400;
+    throw err;
+  }
+  return withTransaction(async (q) => {
+    const { rows: list } = await q(
+      `SELECT id, deleted_at, bukti FROM transactions WHERE tanggal >= $1 AND tanggal < $2`,
+      [range.start, range.end]
+    );
+    const total = list.length;
+    const soft_deleted = list.filter((r) => r.deleted_at != null).length;
+    const with_bukti = list.filter((r) => r.bukti != null && r.bukti !== '').length;
+    if (total === 0) {
+      const err = new Error(`Tidak ada transaksi untuk bulan ${month}.`);
+      err.status = 404;
+      throw err;
+    }
+    const del = await q(
+      `DELETE FROM transactions
+        WHERE tanggal >= $1 AND tanggal < $2
+        RETURNING id`,
+      [range.start, range.end]
+    );
+    await audit(
+      {
+        userId: user.id,
+        username: user.username,
+        action: 'purge',
+        entity: 'month',
+        detail: `${month}: ${del.rowCount} transaksi dihapus permanen (${soft_deleted} soft-deleted, ${with_bukti} bukti)`,
+      },
+      q
+    );
+    return {
+      month,
+      deleted: del.rowCount,
+      soft_deleted,
+      with_bukti,
+    };
+  });
+}
+
+function requireMonthConfirm(month, confirm) {
+  if (confirm !== month) {
+    const err = new Error(
+      `Konfirmasi tidak cocok. Ketik ulang "${month}" di kolom konfirmasi untuk menghapus permanen.`
+    );
+    err.status = 400;
+    throw err;
+  }
+}
+
+// ---------- HAPUS BULAN (HARD DELETE) ----------
+router.post('/purge-month', requireAdmin, async (req, res, next) => {
+  try {
+    const month = String((req.body && req.body.month) || '').trim();
+    const confirm = String((req.body && req.body.confirm) || '').trim();
+    if (!monthRange(month)) {
+      return res.status(400).json({ error: 'Bulan tidak valid. Gunakan format YYYY-MM (contoh 2026-08).' });
+    }
+    requireMonthConfirm(month, confirm);
+    const result = await hardDeleteMonth(month, req.user);
+    res.json({
+      ok: true,
+      ...result,
+      note: 'Data dihapus permanen. Untuk reclaim disk Postgres, jalankan scripts/purge-month.js --vacuum setelahnya bila perlu.',
+    });
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    next(e);
+  }
+});
+
+// Alternatif REST — path /month/:ym harus sebelum /transactions/:id agar tak bentrok.
+router.delete('/transactions/month/:ym', requireAdmin, async (req, res, next) => {
+  try {
+    const month = String(req.params.ym || '').trim();
+    const confirm = String((req.body && req.body.confirm) || '').trim();
+    if (!monthRange(month)) {
+      return res.status(400).json({ error: 'Bulan tidak valid. Gunakan format YYYY-MM (contoh 2026-08).' });
+    }
+    requireMonthConfirm(month, confirm);
+    const result = await hardDeleteMonth(month, req.user);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
     next(e);
   }
 });

@@ -58,6 +58,7 @@
               <button id="company-btn">Profil cetak</button>
               <button id="backup-btn" class="admin-only">Cadangkan data (JSON)</button>
               <button id="restore-btn" class="admin-only">Pulihkan dari cadangan</button>
+              <button id="purge-month-btn" class="admin-only">Hapus bulan…</button>
               <button id="audit-btn" class="admin-only">Riwayat aktivitas</button>
               <input id="restore-file" type="file" accept="application/json,.json" class="hidden" />
               <hr />
@@ -450,6 +451,30 @@
           <label>Keterangan (opsional)<input name="keterangan" maxlength="300" placeholder="mis. Isi ulang kas kecil" /></label>
           <p class="form-error" role="alert" id="transfer-error"></p>
           <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary">Transfer</button></div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ======================= MODAL HAPUS BULAN (HARD DELETE) ======================= -->
+    <div id="purge-month-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="purge-month-modal-title">
+      <div class="modal-box">
+        <h3 id="purge-month-modal-title">Hapus bulan</h3>
+        <p class="muted">Menghapus <strong>permanen</strong> semua transaksi bulan terpilih (termasuk yang diarsipkan &amp; bukti). Tidak bisa dipulihkan kecuali dari cadangan JSON. Soft-delete biasa tidak menghemat ruang disk.</p>
+        <form id="purge-month-form">
+          <label>Bulan
+            <select name="month" id="purge-month-select" required>
+              <option value="">— pilih bulan —</option>
+            </select>
+          </label>
+          <p id="purge-month-stats" class="muted" aria-live="polite"></p>
+          <label>Ketik <span id="purge-month-confirm-hint">YYYY-MM</span> untuk konfirmasi
+            <input name="confirm" id="purge-month-confirm" autocomplete="off" spellcheck="false" required placeholder="2026-08" />
+          </label>
+          <p class="form-error" role="alert" id="purge-month-error"></p>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Batal</button>
+            <button type="submit" class="btn btn-danger" id="purge-month-submit" disabled>Hapus permanen</button>
+          </div>
         </form>
       </div>
     </div>

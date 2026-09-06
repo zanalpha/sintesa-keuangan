@@ -7,7 +7,9 @@ process.env.NODE_ENV = 'test';
 process.env.SESSION_SECRET = 'test-secret-yang-cukup-panjang-1234';
 process.env.ADMIN_USER = 'admin';
 process.env.ADMIN_PASSWORD = 'rahasiakuat123';
-delete process.env.DATABASE_URL; // paksa mode pg-mem
+// String kosong (bukan delete): dotenv.config() di server.js tidak menimpa nilai yang sudah ada,
+// sehingga mode pg-mem tetap terpaksa meski .env lokal punya DATABASE_URL.
+process.env.DATABASE_URL = '';
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -188,4 +190,45 @@ test('login: username tak dikenal & password salah beri pesan sama (anti-enumera
   assert.equal(a.status, 401);
   assert.equal(b.status, 401);
   assert.equal(a.json.error, b.json.error); // pesan identik -> tak membocorkan keberadaan akun
+});
+
+test('hapus bulan: viewer ditolak, format invalid ditolak, admin hard-delete OK', async () => {
+  // Siapkan transaksi Agustus (bulan yang akan dihapus) — Juli sudah ada dari tes sebelumnya.
+  let r = await req('POST', '/api/books/1/transactions', {
+    cookie: adminCookie,
+    body: { type: 'masuk', tanggal: '2026-08-10', jumlah: 777000, keterangan: 'tes-purge-aug' },
+  });
+  assert.equal(r.status, 201);
+  const augId = r.json.transaction.id;
+
+  r = await req('GET', '/api/months', { cookie: viewerCookie });
+  assert.equal(r.status, 403);
+
+  r = await req('POST', '/api/purge-month', { cookie: viewerCookie, body: { month: '2026-08', confirm: '2026-08' } });
+  assert.equal(r.status, 403);
+
+  r = await req('POST', '/api/purge-month', { cookie: adminCookie, body: { month: '2026-13', confirm: '2026-13' } });
+  assert.equal(r.status, 400);
+
+  r = await req('POST', '/api/purge-month', { cookie: adminCookie, body: { month: '2026-08', confirm: 'SALAH' } });
+  assert.equal(r.status, 400);
+
+  r = await req('GET', '/api/months', { cookie: adminCookie });
+  assert.equal(r.status, 200);
+  assert.ok(r.json.months.some((m) => m.month === '2026-08' && m.total >= 1));
+
+  r = await req('POST', '/api/purge-month', { cookie: adminCookie, body: { month: '2026-08', confirm: '2026-08' } });
+  assert.equal(r.status, 200);
+  assert.ok(r.json.deleted >= 1);
+
+  // Transaksi Agustus hilang; Juli tetap ada.
+  r = await req('GET', '/api/books/1/transactions?month=2026-08', { cookie: adminCookie });
+  assert.ok(!r.json.transactions.some((t) => t.id === augId));
+  r = await req('GET', '/api/books/1/transactions?month=2026-07', { cookie: adminCookie });
+  assert.ok(r.json.transactions.length >= 1);
+
+  // Soft-deleted Juli (dari tes sebelumnya) tetap ada di DB — purge bulan Agustus tidak menyentuhnya.
+  // Audit mencatat aksi purge.
+  r = await req('GET', '/api/auth/audit', { cookie: adminCookie });
+  assert.ok(r.json.events.some((ev) => ev.action === 'purge' && /2026-08/.test(ev.detail || '')));
 });
