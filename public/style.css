@@ -574,7 +574,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .audit-table .a-when { white-space: nowrap; color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .audit-table .a-who { white-space: nowrap; font-weight: 600; }
 .a-act { font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: .5px; padding: 1px 6px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line); }
-.a-create { color: var(--in); } .a-update { color: var(--gold); } .a-delete, .a-restore { color: var(--out); } .a-transfer { color: var(--teal); }
+.a-create { color: var(--in); } .a-update { color: var(--gold); } .a-delete, .a-restore { color: var(--out); } .a-transfer, .a-pindah { color: var(--teal); }
 
 /* ---------- Overlay loading / cold-start ---------- */
 .boot-loading {

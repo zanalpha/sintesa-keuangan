@@ -100,7 +100,7 @@ const state = {
   anaScope: '',    // '' = gabungan semua rekening; atau id rekening tertentu
   taxMonth: '',    // YYYY-MM untuk ringkasan pajak (mengikuti bulan tampilan)
   view: 'catatan', // 'catatan' | 'besar' | 'analitik' | 'dana'
-  ringkas: 'ops-gab', // cakupan kartu ringkasan
+  ringkas: 'gabungan', // cakupan kartu ringkasan; gabungan lain hanya jika dipilih
 };
 
 // ---------- Tema / densitas / profil cetak ----------
@@ -223,6 +223,9 @@ async function enterApp() {
   $('app-view').classList.remove('hidden');
   $('menu-user').textContent = 'Masuk sebagai ' + state.user.name + (isAdmin() ? '' : ' (viewer)');
   applyRole();
+  state.ringkas = loadRingkas();
+  const homeScope = $('home-scope-select');
+  if (homeScope) homeScope.value = state.ringkas;
   await loadBooks();
 }
 
@@ -529,20 +532,25 @@ const RINGKAS_SCOPES = {
     ids: ['gabungan'],
     label: 'Anggaran Gabungan',
     sub: 'Hanya saldo Anggaran Gabungan',
-    note: 'Bukan jumlah kategori lain. Operasional dan Saving tidak termasuk.',
+    note: 'Bukan jumlah kategori lain. Operasional dan Saving tidak termasuk, kecuali tampilan gabungan dipilih.',
   },
 };
 
+function ringkasStorageKey() {
+  const who = state.user && state.user.username ? state.user.username : '';
+  return RINGKAS_KEY + ':' + who;
+}
+
 function loadRingkas() {
   try {
-    const v = localStorage.getItem(RINGKAS_KEY);
+    const v = localStorage.getItem(ringkasStorageKey());
     if (RINGKAS_SCOPES[v]) return v;
   } catch (_) { /* private mode */ }
-  return 'ops-gab';
+  return 'gabungan';
 }
 
 function activeRingkas() {
-  return RINGKAS_SCOPES[state.ringkas] || RINGKAS_SCOPES['ops-gab'];
+  return RINGKAS_SCOPES[state.ringkas] || RINGKAS_SCOPES.gabungan;
 }
 
 function ringkasTotal(bal) {
@@ -1138,6 +1146,48 @@ function openTransfer() {
   $('transfer-modal').classList.remove('hidden');
   setTimeout(() => f.jumlah.focus(), 50);
 }
+function openPindahDana() {
+  closeMenu();
+  if (!state.books.length) return toast('Belum ada rekening.', true);
+  lastFocused = document.activeElement;
+  const f = $('pindah-dana-form');
+  f.reset();
+  $('pindah-dana-error').textContent = '';
+  f.book_id.innerHTML = state.books.map((b) => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
+  f.book_id.value = String(state.bookId || state.books[0].id);
+  f.from_dana.value = 'gabungan';
+  f.to_dana.value = 'operasional';
+  f.tanggal.value = todayISO();
+  $('pindah-dana-modal').classList.remove('hidden');
+  setTimeout(() => f.jumlah.focus(), 50);
+}
+$('pindah-dana-form').jumlah.addEventListener('input', formatMoneyInput);
+$('pindah-dana-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  $('pindah-dana-error').textContent = '';
+  if (f.from_dana.value === f.to_dana.value) {
+    $('pindah-dana-error').textContent = 'Pilih dua anggaran yang berbeda.';
+    return;
+  }
+  const payload = {
+    book_id: Number(f.book_id.value),
+    from_dana: f.from_dana.value,
+    to_dana: f.to_dana.value,
+    tanggal: f.tanggal.value,
+    jumlah: f.jumlah.value.replace(/\D/g, ''),
+    keterangan: f.keterangan.value,
+  };
+  if (!payload.jumlah) { $('pindah-dana-error').textContent = 'Jumlah wajib diisi.'; return; }
+  withSubmitLock(f, 'Menyimpan…', async () => {
+    try {
+      await api('POST', '/api/pindah-dana', payload);
+      toast('Dana dipindahkan.');
+      closeModals();
+      loadData().catch(() => toast('Tersimpan. Gagal memuat ulang daftar — silakan segarkan halaman.', true));
+    } catch (err) { $('pindah-dana-error').textContent = err.message; }
+  });
+});
 $('transfer-form').jumlah.addEventListener('input', formatMoneyInput);
 $('transfer-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1616,7 +1666,7 @@ let lastFocused = null;
 let modalDirty = false;
 
 function closeModals() {
-  ['tx-modal', 'book-modal', 'import-modal', 'users-modal', 'password-modal', 'transfer-modal', 'audit-modal', 'company-modal', 'purge-month-modal'].forEach((id) => $(id).classList.add('hidden'));
+  ['tx-modal', 'book-modal', 'import-modal', 'users-modal', 'password-modal', 'transfer-modal', 'pindah-dana-modal', 'audit-modal', 'company-modal', 'purge-month-modal'].forEach((id) => $(id).classList.add('hidden'));
   modalDirty = false;
   if (lastFocused && typeof lastFocused.focus === 'function') {
     try { lastFocused.focus(); } catch (_) {}
@@ -1725,9 +1775,9 @@ function wireStaticHandlers() {
   if (homeScope) {
     homeScope.value = state.ringkas;
     homeScope.addEventListener('change', (e) => {
-      const next = RINGKAS_SCOPES[e.target.value] ? e.target.value : 'ops-gab';
+      const next = RINGKAS_SCOPES[e.target.value] ? e.target.value : 'gabungan';
       state.ringkas = next;
-      try { localStorage.setItem(RINGKAS_KEY, next); } catch (_) { /* private mode */ }
+      try { localStorage.setItem(ringkasStorageKey(), next); } catch (_) { /* private mode */ }
       render();
     });
   }
@@ -1764,6 +1814,7 @@ function wireStaticHandlers() {
   $('settings-book-btn').addEventListener('click', () => { closeMenu(); openBookModal(curBook()); });
   $('book-delete').addEventListener('click', deleteBook);
   $('transfer-btn').addEventListener('click', openTransfer);
+  $('pindah-dana-btn').addEventListener('click', openPindahDana);
   $('users-btn').addEventListener('click', openUsers);
   $('password-btn').addEventListener('click', openPassword);
   $('backup-btn').addEventListener('click', backupData);

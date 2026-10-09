@@ -311,3 +311,44 @@ test('kategori dana: wajib, satu kategori per transaksi, saldo tidak dijumlahkan
   assert.equal(afterDel.total, 160000);
   assert.equal(r.json.transactions.length, 4);
 });
+
+test('pindah antar anggaran mengubah kategori tanpa mengubah saldo rekening', async () => {
+  const { fundBalances } = await import('../public/js/ledger.js');
+  let r = await req('POST', '/api/books', { cookie: adminCookie, body: { name: 'Pindah Uji', saldo_awal: 1000000 } });
+  assert.equal(r.status, 201);
+  const bookId = r.json.book.id;
+  for (const item of [
+    { jumlah: 300000, dana: 'gabungan' },
+    { jumlah: 80000, dana: 'operasional' },
+    { jumlah: 20000, dana: 'saving' },
+  ]) {
+    r = await req('POST', `/api/books/${bookId}/transactions`, {
+      cookie: adminCookie,
+      body: { type: 'masuk', tanggal: '2026-10-01', jumlah: item.jumlah, dana: item.dana },
+    });
+    assert.equal(r.status, 201);
+  }
+
+  r = await req('POST', '/api/pindah-dana', { cookie: viewerCookie, body: { book_id: bookId, from_dana: 'gabungan', to_dana: 'saving', tanggal: '2026-10-02', jumlah: 50000 } });
+  assert.equal(r.status, 403);
+
+  r = await req('POST', '/api/pindah-dana', { cookie: adminCookie, body: { book_id: bookId, from_dana: 'gabungan', to_dana: 'gabungan', tanggal: '2026-10-02', jumlah: 50000 } });
+  assert.equal(r.status, 400);
+
+  r = await req('POST', '/api/pindah-dana', {
+    cookie: adminCookie,
+    body: { book_id: bookId, from_dana: 'gabungan', to_dana: 'operasional', tanggal: '2026-10-02', jumlah: 50000, keterangan: 'alokasi' },
+  });
+  assert.equal(r.status, 201);
+
+  r = await req('GET', `/api/books/${bookId}/transactions`, { cookie: adminCookie });
+  const txs = r.json.transactions;
+  assert.equal(txs.length, 5);
+  const bal = fundBalances(txs);
+  assert.equal(bal.gabungan, 250000);
+  assert.equal(bal.operasional, 130000);
+  assert.equal(bal.saving, 20000);
+  assert.equal(bal.total, 400000);
+  const books = (await req('GET', '/api/books', { cookie: adminCookie })).json.books;
+  assert.equal(books.find((b) => b.id === bookId).sisa, 1400000);
+});

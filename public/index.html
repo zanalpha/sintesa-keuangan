@@ -52,6 +52,7 @@
             <div id="menu-dropdown" class="menu-dropdown hidden">
               <button id="settings-book-btn" class="admin-only">Pengaturan rekening</button>
               <button id="transfer-btn" class="admin-only">Transfer antar rekening</button>
+              <button id="pindah-dana-btn" class="admin-only">Pindah antar anggaran</button>
               <hr class="admin-only" />
               <button id="users-btn" class="admin-only">Kelola pengguna</button>
               <button id="password-btn">Ganti password</button>
@@ -85,11 +86,11 @@
               <label class="home-scope-pick">
                 <span>Tampilan</span>
                 <select id="home-scope-select" title="Pilih cakupan saldo di ringkasan">
-                  <option value="semua">Semua dana</option>
-                  <option value="ops-gab" selected>Operasional &amp; Gabungan</option>
+                  <option value="gabungan" selected>Anggaran Gabungan</option>
                   <option value="operasional">Anggaran Operasional</option>
                   <option value="saving">Saving</option>
-                  <option value="gabungan">Anggaran Gabungan</option>
+                  <option value="ops-gab">Operasional &amp; Gabungan</option>
+                  <option value="semua">Semua dana</option>
                 </select>
               </label>
               <span class="home-dash-month" id="home-month-label"></span>
@@ -97,13 +98,13 @@
           </div>
           <div class="home-balance">
             <div class="home-balance-copy">
-              <span class="home-balance-label">Dana Operasional &amp; Gabungan</span>
-              <span class="home-balance-sub">Saldo Operasional + Saldo Gabungan</span>
+              <span class="home-balance-label">Anggaran Gabungan</span>
+              <span class="home-balance-sub">Hanya saldo Anggaran Gabungan</span>
             </div>
             <span class="home-balance-value" id="home-saldo">Rp0</span>
           </div>
           <div class="home-fund-split" id="home-fund-split" aria-label="Rincian saldo sesuai tampilan"></div>
-          <p class="home-scope" id="home-scope">Saving tidak termasuk pada saldo maupun arus bulan ini.</p>
+          <p class="home-scope" id="home-scope">Bukan jumlah kategori lain. Operasional dan Saving tidak termasuk, kecuali tampilan gabungan dipilih.</p>
           <div class="home-dash-stats">
             <div class="home-stat home-stat-in">
               <span class="home-stat-label">Masuk</span>
@@ -133,7 +134,7 @@
             <span class="card-value" id="sum-keluar">Rp0</span>
           </div>
           <div class="card card-balance tick">
-            <span class="card-label" id="lbl-sisa">Dana Operasional &amp; Gabungan</span>
+            <span class="card-label" id="lbl-sisa">Anggaran Gabungan</span>
             <span class="card-value" id="sum-sisa">Rp0</span>
           </div>
         </section>
@@ -497,6 +498,36 @@
           </label>
           <p class="form-error" role="alert" id="add-user-error"></p>
           <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Tutup</button><button type="submit" class="btn btn-primary">Tambah</button></div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ======================= MODAL PINDAH ANTAR ANGGARAN ======================= -->
+    <div id="pindah-dana-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pindah-dana-modal-title">
+      <div class="modal-box">
+        <h3 id="pindah-dana-modal-title">Pindah Antar Anggaran</h3>
+        <p class="muted">Memindahkan sejumlah dana dari satu kategori ke kategori lain pada rekening yang sama. Saldo rekening tidak berubah. Total seluruh dana tetap.</p>
+        <form id="pindah-dana-form">
+          <label>Rekening<select name="book_id" required></select></label>
+          <label>Dari Anggaran
+            <select name="from_dana" required>
+              <option value="gabungan">Anggaran Gabungan</option>
+              <option value="operasional">Anggaran Operasional</option>
+              <option value="saving">Saving</option>
+            </select>
+          </label>
+          <label>Ke Anggaran
+            <select name="to_dana" required>
+              <option value="operasional">Anggaran Operasional</option>
+              <option value="gabungan">Anggaran Gabungan</option>
+              <option value="saving">Saving</option>
+            </select>
+          </label>
+          <label>Tanggal<input name="tanggal" type="date" required /></label>
+          <label>Jumlah (Rp)<input name="jumlah" inputmode="numeric" autocomplete="off" placeholder="0" required /></label>
+          <label>Keterangan (opsional)<input name="keterangan" maxlength="300" placeholder="mis. Alokasi bulan ini" /></label>
+          <p class="form-error" role="alert" id="pindah-dana-error"></p>
+          <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary">Pindahkan</button></div>
         </form>
       </div>
     </div>

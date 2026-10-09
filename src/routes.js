@@ -33,6 +33,12 @@ function parseAmount(v) {
   return Number.isInteger(n) && n <= 1e15 ? n : null;
 }
 
+const DANA_NAME = {
+  operasional: 'Anggaran Operasional',
+  saving: 'Saving',
+  gabungan: 'Anggaran Gabungan',
+};
+
 const DANA_ALIAS = {
   operasional: 'operasional',
   'anggaran operasional': 'operasional',
@@ -470,6 +476,53 @@ router.post('/transfer', requireAdmin, async (req, res, next) => {
         [toId, tanggal, jumlah, ketIn, danaRes.value, req.session.userId]
       );
       await audit({ userId: req.user.id, username: req.user.username, action: 'transfer', entity: 'transaction', detail: `${jumlah} ${nameOf(fromId)}->${nameOf(toId)} dana:${danaRes.value}` }, q);
+    });
+    res.status(201).json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Pindah antar kategori dana pada rekening yang sama.
+// Sepasang transaksi (keluar di asal, masuk di tujuan) saling menghapus di saldo rekening,
+// tetapi saldo kategori berubah. Total seluruh dana tetap.
+router.post('/pindah-dana', requireAdmin, async (req, res, next) => {
+  try {
+    const bookId = Number(req.body.book_id);
+    const tanggal = String(req.body.tanggal || '');
+    const jumlah = parseAmount(req.body.jumlah);
+    const catatan = String(req.body.keterangan || '').trim().slice(0, 300);
+    const fromDana = normDana(req.body.from_dana);
+    const toDana = normDana(req.body.to_dana);
+    if (!Number.isInteger(bookId) || !(await bookExists(bookId)))
+      return res.status(404).json({ error: 'Rekening tidak ditemukan.' });
+    if (!fromDana || !toDana) return res.status(400).json({ error: 'Kategori dana tidak valid.' });
+    if (fromDana === toDana) return res.status(400).json({ error: 'Pilih dua anggaran yang berbeda.' });
+    if (!validDate(tanggal)) return res.status(400).json({ error: 'Tanggal tidak valid.' });
+    if (jumlah === null || jumlah <= 0) return res.status(400).json({ error: 'Jumlah tidak valid.' });
+
+    const fromName = DANA_NAME[fromDana];
+    const toName = DANA_NAME[toDana];
+    await withTransaction(async (q) => {
+      const ketOut = `Pindah ke ${toName}${catatan ? ' — ' + catatan : ''}`.slice(0, 500);
+      const ketIn = `Pindah dari ${fromName}${catatan ? ' — ' + catatan : ''}`.slice(0, 500);
+      await q(
+        `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, dana, created_by)
+         VALUES ($1,'keluar',$2,$3,$4,'Pindah Anggaran',$5,$6)`,
+        [bookId, tanggal, jumlah, ketOut, fromDana, req.session.userId]
+      );
+      await q(
+        `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, dana, created_by)
+         VALUES ($1,'masuk',$2,$3,$4,'Pindah Anggaran',$5,$6)`,
+        [bookId, tanggal, jumlah, ketIn, toDana, req.session.userId]
+      );
+      await audit({
+        userId: req.user.id,
+        username: req.user.username,
+        action: 'pindah',
+        entity: 'transaction',
+        detail: `${jumlah} ${fromDana}->${toDana} @book:${bookId}`,
+      }, q);
     });
     res.status(201).json({ ok: true });
   } catch (e) {
