@@ -7,7 +7,7 @@
    ============================================================ */
 import { rupiah, BULAN_S, tanggalIndo, labelBulan, todayISO, escapeHtml, slug, csvCell, downloadBlob, isYearMonth, shiftMonth, monthsBetween } from './js/format.js';
 import { parseCsv, rowsToTransactions } from './js/csv.js';
-import { computeLedger, DANA, DANA_IDS, fundKey, danaChoices, fundBalances, inOperasionalGabungan } from './js/ledger.js';
+import { computeLedger, DANA, DANA_IDS, fundKey, danaChoices, fundBalances } from './js/ledger.js';
 
 // ---------- Util (DOM) ----------
 const $ = (id) => document.getElementById(id);
@@ -100,6 +100,7 @@ const state = {
   anaScope: '',    // '' = gabungan semua rekening; atau id rekening tertentu
   taxMonth: '',    // YYYY-MM untuk ringkasan pajak (mengikuti bulan tampilan)
   view: 'catatan', // 'catatan' | 'besar' | 'analitik' | 'dana'
+  ringkas: 'ops-gab', // cakupan kartu ringkasan
 };
 
 // ---------- Tema / densitas / profil cetak ----------
@@ -444,8 +445,9 @@ function render() {
   const hasSoftFilter = !!(state.kategori || state.dana || state.search.trim());
 
   const danaNow = fundBalances(state.transactions);
-  let saldoCard = danaNow.operasionalDanGabungan;
-  let lblSisa = 'Dana Operasional & Gabungan';
+  const scope = activeRingkas();
+  let saldoCard = ringkasTotal(danaNow);
+  let lblSisa = scope.label;
   let lblMasuk = 'Pemasukan (filter)';
   let lblKeluar = 'Pengeluaran (filter)';
   let caption = '';
@@ -455,7 +457,7 @@ function render() {
     if (state.kategori) bits.push('kategori ' + state.kategori);
     if (state.dana && DANA[state.dana]) bits.push('dana ' + DANA[state.dana].name);
     if (state.search.trim()) bits.push('pencarian');
-    caption = 'Masuk/keluar mengikuti ' + bits.join(' + ') + '. Dana Operasional & Gabungan tetap utuh (tanpa Saving).';
+    caption = 'Masuk/keluar mengikuti ' + bits.join(' + ') + '. ' + scope.label + ' tetap utuh.';
   }
 
   $('sum-masuk').textContent = rupiah(totalMasuk);
@@ -497,31 +499,98 @@ function bookSisa(book) {
   return (book.saldo_awal || 0) + masuk - keluar;
 }
 
-/** Ringkasan beranda: saldo hidup + arus kas bulan terpilih. */
+const RINGKAS_KEY = 'sintesa_ringkas';
+const RINGKAS_SCOPES = {
+  semua: {
+    ids: ['operasional', 'saving', 'gabungan'],
+    label: 'Semua Dana',
+    sub: 'Operasional + Saving + Anggaran Gabungan',
+    note: 'Mencakup Anggaran Operasional, Saving, dan Anggaran Gabungan.',
+  },
+  'ops-gab': {
+    ids: ['operasional', 'gabungan'],
+    label: 'Dana Operasional & Gabungan',
+    sub: 'Saldo Operasional + Saldo Gabungan',
+    note: 'Saving tidak termasuk pada saldo maupun arus bulan ini.',
+  },
+  operasional: {
+    ids: ['operasional'],
+    label: 'Anggaran Operasional',
+    sub: 'Hanya saldo Anggaran Operasional',
+    note: 'Saving dan Anggaran Gabungan tidak termasuk.',
+  },
+  saving: {
+    ids: ['saving'],
+    label: 'Saving',
+    sub: 'Hanya saldo Saving',
+    note: 'Anggaran Operasional dan Anggaran Gabungan tidak termasuk.',
+  },
+  gabungan: {
+    ids: ['gabungan'],
+    label: 'Anggaran Gabungan',
+    sub: 'Hanya saldo Anggaran Gabungan',
+    note: 'Bukan jumlah kategori lain. Operasional dan Saving tidak termasuk.',
+  },
+};
+
+function loadRingkas() {
+  try {
+    const v = localStorage.getItem(RINGKAS_KEY);
+    if (RINGKAS_SCOPES[v]) return v;
+  } catch (_) { /* private mode */ }
+  return 'ops-gab';
+}
+
+function activeRingkas() {
+  return RINGKAS_SCOPES[state.ringkas] || RINGKAS_SCOPES['ops-gab'];
+}
+
+function ringkasTotal(bal) {
+  return activeRingkas().ids.reduce((sum, id) => sum + (bal[id] || 0), 0);
+}
+
+function inRingkas(t) {
+  return activeRingkas().ids.includes(fundKey(t && t.dana));
+}
+
+/** Ringkasan beranda: saldo hidup + arus kas bulan terpilih, sesuai tampilan yang dipilih. */
 function renderHomeDash() {
   const ym = isYearMonth(state.month) ? state.month : todayISO().slice(0, 7);
   const elLabel = $('home-month-label');
   if (elLabel) elLabel.textContent = labelBulan(ym);
 
+  const scope = activeRingkas();
+  const sel = $('home-scope-select');
+  if (sel && sel.value !== state.ringkas) sel.value = state.ringkas;
+
   const book = curBook();
   const bal = fundBalances(book ? state.transactions : []);
+  const total = ringkasTotal(bal);
+  const labelEl = document.querySelector('.home-balance-label');
+  const subEl = document.querySelector('.home-balance-sub');
+  if (labelEl) labelEl.textContent = scope.label;
+  if (subEl) subEl.textContent = scope.sub;
+  const noteEl = $('home-scope');
+  if (noteEl) noteEl.textContent = scope.note;
+
   const elSaldo = $('home-saldo');
   if (elSaldo) {
-    elSaldo.textContent = rupiah(bal.operasionalDanGabungan);
-    elSaldo.classList.toggle('is-neg', bal.operasionalDanGabungan < 0);
-  }
-  const elOp = $('home-op');
-  const elGab = $('home-gab');
-  if (elOp) {
-    elOp.textContent = rupiah(bal.operasional);
-    elOp.classList.toggle('is-neg', bal.operasional < 0);
-  }
-  if (elGab) {
-    elGab.textContent = rupiah(bal.gabungan);
-    elGab.classList.toggle('is-neg', bal.gabungan < 0);
+    elSaldo.textContent = rupiah(total);
+    elSaldo.classList.toggle('is-neg', total < 0);
   }
 
-  const tx = state.transactions.filter((t) => t.tanggal.slice(0, 7) === ym && inOperasionalGabungan(t));
+  const split = $('home-fund-split');
+  if (split) {
+    const showParts = scope.ids.length > 1;
+    split.classList.toggle('hidden', !showParts);
+    split.classList.toggle('cols-3', scope.ids.length === 3);
+    split.innerHTML = showParts ? scope.ids.map((id) => {
+      const n = bal[id] || 0;
+      return `<div class="home-fund"><span class="home-fund-label">${escapeHtml(DANA[id].name)}</span><span class="home-fund-value${n < 0 ? ' is-neg' : ''}">${rupiah(n)}</span></div>`;
+    }).join('') : '';
+  }
+
+  const tx = state.transactions.filter((t) => t.tanggal.slice(0, 7) === ym && inRingkas(t));
   const masuk = tx.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
   const keluar = tx.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
   const net = masuk - keluar;
@@ -1651,6 +1720,17 @@ function wireStaticHandlers() {
   }
   $('kategori-filter').addEventListener('change', (e) => { state.kategori = e.target.value; render(); });
   $('dana-filter').addEventListener('change', (e) => { state.dana = e.target.value; render(); });
+  state.ringkas = loadRingkas();
+  const homeScope = $('home-scope-select');
+  if (homeScope) {
+    homeScope.value = state.ringkas;
+    homeScope.addEventListener('change', (e) => {
+      const next = RINGKAS_SCOPES[e.target.value] ? e.target.value : 'ops-gab';
+      state.ringkas = next;
+      try { localStorage.setItem(RINGKAS_KEY, next); } catch (_) { /* private mode */ }
+      render();
+    });
+  }
   let searchTimer;
   $('search-input').addEventListener('input', (e) => {
     state.search = e.target.value;

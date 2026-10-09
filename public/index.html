@@ -81,7 +81,19 @@
         <section class="home-dash" id="home-dash" aria-label="Ringkasan rekening">
           <div class="home-dash-head">
             <h2 class="home-dash-title">Ringkasan</h2>
-            <span class="home-dash-month" id="home-month-label"></span>
+            <div class="home-dash-tools">
+              <label class="home-scope-pick">
+                <span>Tampilan</span>
+                <select id="home-scope-select" title="Pilih cakupan saldo di ringkasan">
+                  <option value="semua">Semua dana</option>
+                  <option value="ops-gab" selected>Operasional &amp; Gabungan</option>
+                  <option value="operasional">Anggaran Operasional</option>
+                  <option value="saving">Saving</option>
+                  <option value="gabungan">Anggaran Gabungan</option>
+                </select>
+              </label>
+              <span class="home-dash-month" id="home-month-label"></span>
+            </div>
           </div>
           <div class="home-balance">
             <div class="home-balance-copy">
@@ -90,16 +102,7 @@
             </div>
             <span class="home-balance-value" id="home-saldo">Rp0</span>
           </div>
-          <div class="home-fund-split" aria-label="Rincian saldo Operasional dan Gabungan">
-            <div class="home-fund">
-              <span class="home-fund-label">Anggaran Operasional</span>
-              <span class="home-fund-value" id="home-op">Rp0</span>
-            </div>
-            <div class="home-fund">
-              <span class="home-fund-label">Anggaran Gabungan</span>
-              <span class="home-fund-value" id="home-gab">Rp0</span>
-            </div>
-          </div>
+          <div class="home-fund-split" id="home-fund-split" aria-label="Rincian saldo sesuai tampilan"></div>
           <p class="home-scope" id="home-scope">Saving tidak termasuk pada saldo maupun arus bulan ini.</p>
           <div class="home-dash-stats">
             <div class="home-stat home-stat-in">

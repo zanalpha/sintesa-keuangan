@@ -679,7 +679,16 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 }
 .home-dash-head {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 10px; margin-bottom: 12px;
+  gap: 10px; margin-bottom: 12px; flex-wrap: wrap;
+}
+.home-dash-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.home-scope-pick {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; color: var(--muted);
+}
+.home-scope-pick select {
+  text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 700;
+  max-width: min(240px, 70vw);
 }
 .home-balance {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
@@ -701,6 +710,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 }
 .home-balance-value.is-neg, .home-fund-value.is-neg, .card-value.is-neg { color: var(--out); }
 .home-fund-split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.home-fund-split.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.home-fund-split.hidden { display: none; }
 .home-fund {
   background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
   padding: 8px 12px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0;
@@ -731,7 +742,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .dana-card-total { grid-column: 1 / -1; }
 .card-hint { font-size: 12px; color: var(--muted); font-weight: 600; line-height: 1.4; }
 @media (max-width: 720px) {
-  .home-fund-split, .dana-grid { grid-template-columns: 1fr; }
+  .home-fund-split, .home-fund-split.cols-3, .dana-grid { grid-template-columns: 1fr; }
   .view-toggle { flex-wrap: wrap; }
 }
 .home-dash-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
