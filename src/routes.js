@@ -33,6 +33,58 @@ function parseAmount(v) {
   return Number.isInteger(n) && n <= 1e15 ? n : null;
 }
 
+const DANA_ALIAS = {
+  operasional: 'operasional',
+  'anggaran operasional': 'operasional',
+  'pemasukan anggaran operasional': 'operasional',
+  'pengeluaran anggaran operasional': 'operasional',
+  saving: 'saving',
+  tabungan: 'saving',
+  'pemasukan saving': 'saving',
+  'pengeluaran saving': 'saving',
+  gabungan: 'gabungan',
+  'anggaran gabungan': 'gabungan',
+  'pemasukan anggaran gabungan': 'gabungan',
+  'pengeluaran anggaran gabungan': 'gabungan',
+};
+
+/** Kode kategori dana, atau '' bila tidak dikenali. */
+function normDana(v) {
+  const s = String(v == null ? '' : v).trim().toLowerCase();
+  return DANA_ALIAS[s] || '';
+}
+
+/**
+ * required: form tambah/ubah — kosong atau tidak dikenal ditolak.
+ * fallback: impor/pulihkan/transfer lama tanpa kolom — kosong menjadi operasional.
+ */
+function resolveDana(body, { required, fallback } = {}) {
+  const raw = body && body.dana;
+  const missing = raw == null || String(raw).trim() === '';
+  if (missing) {
+    if (required) return { ok: false, error: 'Kategori dana wajib dipilih.' };
+    return { ok: true, value: fallback || 'operasional' };
+  }
+  const value = normDana(raw);
+  if (!value) return { ok: false, error: 'Kategori dana tidak valid.' };
+  return { ok: true, value };
+}
+
+function txOut(r) {
+  const out = {
+    id: r.id,
+    type: r.type,
+    tanggal: r.tanggal,
+    jumlah: num(r.jumlah),
+    keterangan: r.keterangan,
+    kategori: r.kategori,
+    dana: r.dana || 'operasional',
+    has_bukti: !!r.has_bukti,
+  };
+  if (r.book_id != null) out.book_id = r.book_id;
+  return out;
+}
+
 function validDate(s) {
   if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
   // Date.parse tidak cukup: V8 "menggulung" tanggal mustahil (31 April -> 1 Mei),
@@ -74,13 +126,13 @@ router.get('/backup', requireAdmin, async (req, res, next) => {
     let lastId = 0, first = true;
     for (;;) {
       const { rows } = await query(
-        `SELECT id, book_id, type, tanggal, jumlah, keterangan, kategori, bukti, created_at
+        `SELECT id, book_id, type, tanggal, jumlah, keterangan, kategori, dana, bukti, created_at
            FROM transactions WHERE deleted_at IS NULL AND id > $2 ORDER BY id LIMIT $1`,
         [BATCH, lastId]
       );
       if (rows.length === 0) break;
       for (const t of rows) {
-        res.write((first ? '' : ',') + JSON.stringify({ ...t, jumlah: num(t.jumlah) }));
+        res.write((first ? '' : ',') + JSON.stringify({ ...t, jumlah: num(t.jumlah), dana: t.dana || 'operasional' }));
         first = false;
       }
       lastId = rows[rows.length - 1].id;
@@ -137,12 +189,14 @@ router.post('/restore', requireAdmin, async (req, res, next) => {
         if (!bookId) { skipped++; continue; } // transaksi tanpa buku terpetakan
         const { type, tanggal, jumlah, keterangan, kategori } = readTxBody(t);
         if (!type || !validDate(tanggal) || jumlah === null) { skipped++; continue; } // data tak valid
+        const danaRes = resolveDana(t, { required: false, fallback: 'operasional' });
+        if (!danaRes.ok) { skipped++; continue; }
         const nbk = normBukti(t.bukti);
         if (t.bukti && !nbk.ok) buktiDropped++; // bukti lama tak lolos validasi -> dibuang (dicatat)
         await q(
-          `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, bukti, created_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [bookId, type, tanggal, jumlah, keterangan, kategori, nbk.ok ? nbk.value : null, req.session.userId]
+          `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, dana, bukti, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [bookId, type, tanggal, jumlah, keterangan, kategori, danaRes.value, nbk.ok ? nbk.value : null, req.session.userId]
         );
         nt++;
       }
@@ -280,7 +334,7 @@ router.get('/books/:id/transactions', async (req, res, next) => {
 
     // Catatan: kolom "bukti" (blob) TIDAK diambil di daftar agar respons tetap ringan;
     // hanya penanda has_bukti. Blob diambil terpisah lewat /transactions/:id/bukti.
-    let sql = `SELECT id, type, tanggal, jumlah, keterangan, kategori, (bukti IS NOT NULL) AS has_bukti
+    let sql = `SELECT id, type, tanggal, jumlah, keterangan, kategori, dana, (bukti IS NOT NULL) AS has_bukti
                  FROM transactions WHERE book_id = $1 AND deleted_at IS NULL`;
     const params = [id];
 
@@ -293,16 +347,7 @@ router.get('/books/:id/transactions', async (req, res, next) => {
     sql += ' ORDER BY tanggal ASC, id ASC';
 
     const { rows } = await query(sql, params);
-    const transactions = rows.map((r) => ({
-      id: r.id,
-      type: r.type,
-      tanggal: r.tanggal,
-      jumlah: num(r.jumlah),
-      keterangan: r.keterangan,
-      kategori: r.kategori,
-      has_bukti: !!r.has_bukti,
-    }));
-    res.json({ transactions });
+    res.json({ transactions: rows.map(txOut) });
   } catch (e) {
     next(e);
   }
@@ -312,20 +357,10 @@ router.get('/books/:id/transactions', async (req, res, next) => {
 router.get('/all-transactions', async (req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT id, book_id, type, tanggal, jumlah, keterangan, kategori, (bukti IS NOT NULL) AS has_bukti
+      `SELECT id, book_id, type, tanggal, jumlah, keterangan, kategori, dana, (bukti IS NOT NULL) AS has_bukti
          FROM transactions WHERE deleted_at IS NULL ORDER BY tanggal ASC, id ASC`
     );
-    const transactions = rows.map((r) => ({
-      id: r.id,
-      book_id: r.book_id,
-      type: r.type,
-      tanggal: r.tanggal,
-      jumlah: num(r.jumlah),
-      keterangan: r.keterangan,
-      kategori: r.kategori,
-      has_bukti: !!r.has_bukti,
-    }));
-    res.json({ transactions });
+    res.json({ transactions: rows.map(txOut) });
   } catch (e) {
     next(e);
   }
@@ -383,18 +418,20 @@ router.post('/books/:id/transactions', requireAdmin, async (req, res, next) => {
     if (!type) return res.status(400).json({ error: 'Jenis harus "masuk" atau "keluar".' });
     if (!validDate(tanggal)) return res.status(400).json({ error: 'Tanggal tidak valid.' });
     if (jumlah === null) return res.status(400).json({ error: 'Jumlah tidak valid.' });
+    const danaRes = resolveDana(req.body, { required: true });
+    if (!danaRes.ok) return res.status(400).json({ error: danaRes.error });
     const nb = normBukti(req.body.bukti);
     if (!nb.ok) return res.status(400).json({ error: nb.tooBig ? 'Ukuran bukti terlalu besar (maks ~3MB).' : 'Format bukti tidak didukung (gambar/PDF).' });
 
     const { rows } = await query(
-      `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, bukti, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, type, tanggal, jumlah, keterangan, kategori, (bukti IS NOT NULL) AS has_bukti`,
-      [id, type, tanggal, jumlah, keterangan, kategori, nb.value, req.session.userId]
+      `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, dana, bukti, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING id, type, tanggal, jumlah, keterangan, kategori, dana, (bukti IS NOT NULL) AS has_bukti`,
+      [id, type, tanggal, jumlah, keterangan, kategori, danaRes.value, nb.value, req.session.userId]
     );
     const t = rows[0];
-    await audit({ userId: req.user.id, username: req.user.username, action: 'create', entity: 'transaction', entityId: t.id, detail: `${type} ${num(t.jumlah)} @book:${id}` });
-    res.status(201).json({ transaction: { ...t, jumlah: num(t.jumlah), has_bukti: !!t.has_bukti } });
+    await audit({ userId: req.user.id, username: req.user.username, action: 'create', entity: 'transaction', entityId: t.id, detail: `${type} ${num(t.jumlah)} dana:${danaRes.value} @book:${id}` });
+    res.status(201).json({ transaction: txOut(t) });
   } catch (e) {
     next(e);
   }
@@ -412,6 +449,8 @@ router.post('/transfer', requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: 'Pilih dua rekening berbeda.' });
     if (!validDate(tanggal)) return res.status(400).json({ error: 'Tanggal tidak valid.' });
     if (jumlah === null || jumlah <= 0) return res.status(400).json({ error: 'Jumlah tidak valid.' });
+    const danaRes = resolveDana(req.body, { required: false, fallback: 'operasional' });
+    if (!danaRes.ok) return res.status(400).json({ error: danaRes.error });
 
     const bk = await query('SELECT id, name FROM books WHERE id IN ($1, $2) AND deleted_at IS NULL', [fromId, toId]);
     if (bk.rows.length !== 2) return res.status(404).json({ error: 'Rekening tidak ditemukan.' });
@@ -421,16 +460,16 @@ router.post('/transfer', requireAdmin, async (req, res, next) => {
       const ketOut = `Transfer ke ${nameOf(toId)}${catatan ? ' — ' + catatan : ''}`.slice(0, 500);
       const ketIn = `Transfer dari ${nameOf(fromId)}${catatan ? ' — ' + catatan : ''}`.slice(0, 500);
       await q(
-        `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, created_by)
-         VALUES ($1,'keluar',$2,$3,$4,'Transfer',$5)`,
-        [fromId, tanggal, jumlah, ketOut, req.session.userId]
+        `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, dana, created_by)
+         VALUES ($1,'keluar',$2,$3,$4,'Transfer',$5,$6)`,
+        [fromId, tanggal, jumlah, ketOut, danaRes.value, req.session.userId]
       );
       await q(
-        `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, created_by)
-         VALUES ($1,'masuk',$2,$3,$4,'Transfer',$5)`,
-        [toId, tanggal, jumlah, ketIn, req.session.userId]
+        `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, dana, created_by)
+         VALUES ($1,'masuk',$2,$3,$4,'Transfer',$5,$6)`,
+        [toId, tanggal, jumlah, ketIn, danaRes.value, req.session.userId]
       );
-      await audit({ userId: req.user.id, username: req.user.username, action: 'transfer', entity: 'transaction', detail: `${jumlah} ${nameOf(fromId)}->${nameOf(toId)}` }, q);
+      await audit({ userId: req.user.id, username: req.user.username, action: 'transfer', entity: 'transaction', detail: `${jumlah} ${nameOf(fromId)}->${nameOf(toId)} dana:${danaRes.value}` }, q);
     });
     res.status(201).json({ ok: true });
   } catch (e) {
@@ -461,10 +500,15 @@ router.post('/books/:id/transactions/bulk', requireAdmin, async (req, res, next)
           errors.push({ baris: i + 1, alasan: 'jenis/tanggal/jumlah tidak valid' });
           continue;
         }
+        const danaRes = resolveDana(items[i], { required: false, fallback: 'operasional' });
+        if (!danaRes.ok) {
+          errors.push({ baris: i + 1, alasan: danaRes.error });
+          continue;
+        }
         await q(
-          `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [id, type, tanggal, jumlah, keterangan, kategori, req.session.userId]
+          `INSERT INTO transactions (book_id, type, tanggal, jumlah, keterangan, kategori, dana, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [id, type, tanggal, jumlah, keterangan, kategori, danaRes.value, req.session.userId]
         );
         ok++;
       }
@@ -484,9 +528,11 @@ router.patch('/transactions/:id', requireAdmin, async (req, res, next) => {
     if (!type) return res.status(400).json({ error: 'Jenis harus "masuk" atau "keluar".' });
     if (!validDate(tanggal)) return res.status(400).json({ error: 'Tanggal tidak valid.' });
     if (jumlah === null) return res.status(400).json({ error: 'Jumlah tidak valid.' });
+    const danaRes = resolveDana(req.body, { required: true });
+    if (!danaRes.ok) return res.status(400).json({ error: danaRes.error });
 
-    const sets = ['type=$1', 'tanggal=$2', 'jumlah=$3', 'keterangan=$4', 'kategori=$5'];
-    const params = [type, tanggal, jumlah, keterangan, kategori];
+    const sets = ['type=$1', 'tanggal=$2', 'jumlah=$3', 'keterangan=$4', 'kategori=$5', 'dana=$6'];
+    const params = [type, tanggal, jumlah, keterangan, kategori, danaRes.value];
     // "bukti" hanya diubah bila field ini disertakan (biar edit biasa tak menimpa bukti lama).
     if (Object.prototype.hasOwnProperty.call(req.body, 'bukti')) {
       const nb = normBukti(req.body.bukti);
@@ -497,13 +543,13 @@ router.patch('/transactions/:id', requireAdmin, async (req, res, next) => {
     params.push(id);
     const { rows } = await query(
       `UPDATE transactions SET ${sets.join(', ')} WHERE id=$${params.length} AND deleted_at IS NULL
-        RETURNING id, type, tanggal, jumlah, keterangan, kategori, (bukti IS NOT NULL) AS has_bukti`,
+        RETURNING id, type, tanggal, jumlah, keterangan, kategori, dana, (bukti IS NOT NULL) AS has_bukti`,
       params
     );
     if (!rows.length) return res.status(404).json({ error: 'Transaksi tidak ditemukan.' });
     const t = rows[0];
-    await audit({ userId: req.user.id, username: req.user.username, action: 'update', entity: 'transaction', entityId: id, detail: `${type} ${num(t.jumlah)}` });
-    res.json({ transaction: { ...t, jumlah: num(t.jumlah), has_bukti: !!t.has_bukti } });
+    await audit({ userId: req.user.id, username: req.user.username, action: 'update', entity: 'transaction', entityId: id, detail: `${type} ${num(t.jumlah)} dana:${t.dana}` });
+    res.json({ transaction: txOut(t) });
   } catch (e) {
     next(e);
   }

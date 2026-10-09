@@ -43,8 +43,8 @@ export function normDate(s) {
 export function rowsToTransactions(rows) {
   if (!rows.length) return [];
   const header = rows[0].map((h) => String(h).trim().toLowerCase());
-  const hasHeader = header.some((h) => ['jenis', 'tanggal', 'jumlah', 'keterangan', 'kategori', 'type', 'date', 'amount'].includes(h));
-  let idx = { jenis: 0, tanggal: 1, jumlah: 2, keterangan: 3, kategori: 4 };
+  const hasHeader = header.some((h) => ['jenis', 'tanggal', 'jumlah', 'keterangan', 'kategori', 'type', 'date', 'amount', 'kategori dana', 'dana'].includes(h));
+  let idx = { jenis: 0, tanggal: 1, jumlah: 2, keterangan: 3, kategori: 4, dana: -1 };
   let data = rows;
   if (hasHeader) {
     const find = (...names) => header.findIndex((h) => names.includes(h));
@@ -54,6 +54,7 @@ export function rowsToTransactions(rows) {
       jumlah: find('jumlah', 'amount', 'nominal'),
       keterangan: find('keterangan', 'deskripsi', 'uraian', 'description'),
       kategori: find('kategori', 'category'),
+      dana: find('kategori dana', 'dana', 'sumber dana', 'sumber_dana', 'kategori_dana'),
     };
     data = rows.slice(1);
   }
@@ -69,7 +70,9 @@ export function rowsToTransactions(rows) {
     // agar "1.500.000,00" -> 1500000 (bukan 150000000 alias 100x lipat). "1.500.000" tetap utuh.
     const jumlah = get('jumlah').trim().replace(/[.,]\d{1,2}$/, '').replace(/[^\d]/g, '');
     if (!type || !tanggal || !jumlah) continue;
-    out.push({ type, tanggal, jumlah, keterangan: get('keterangan'), kategori: get('kategori') });
+    const row = { type, tanggal, jumlah, keterangan: get('keterangan'), kategori: get('kategori') };
+    if (idx.dana >= 0) row.dana = get('dana');
+    out.push(row);
   }
   return out;
 }

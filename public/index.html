@@ -84,9 +84,23 @@
             <span class="home-dash-month" id="home-month-label"></span>
           </div>
           <div class="home-balance">
-            <span class="home-balance-label">Saldo rekening</span>
+            <div class="home-balance-copy">
+              <span class="home-balance-label">Dana Operasional &amp; Gabungan</span>
+              <span class="home-balance-sub">Saldo Operasional + Saldo Gabungan</span>
+            </div>
             <span class="home-balance-value" id="home-saldo">Rp0</span>
           </div>
+          <div class="home-fund-split" aria-label="Rincian saldo Operasional dan Gabungan">
+            <div class="home-fund">
+              <span class="home-fund-label">Anggaran Operasional</span>
+              <span class="home-fund-value" id="home-op">Rp0</span>
+            </div>
+            <div class="home-fund">
+              <span class="home-fund-label">Anggaran Gabungan</span>
+              <span class="home-fund-value" id="home-gab">Rp0</span>
+            </div>
+          </div>
+          <p class="home-scope" id="home-scope">Saving tidak termasuk pada saldo maupun arus bulan ini.</p>
           <div class="home-dash-stats">
             <div class="home-stat home-stat-in">
               <span class="home-stat-label">Masuk</span>
@@ -116,7 +130,7 @@
             <span class="card-value" id="sum-keluar">Rp0</span>
           </div>
           <div class="card card-balance tick">
-            <span class="card-label" id="lbl-sisa">Saldo Rekening</span>
+            <span class="card-label" id="lbl-sisa">Dana Operasional &amp; Gabungan</span>
             <span class="card-value" id="sum-sisa">Rp0</span>
           </div>
         </section>
@@ -127,6 +141,7 @@
             <button type="button" class="vt-btn active" id="tab-catatan" data-view="catatan" role="tab" aria-selected="true" aria-controls="ledger-view">Catatan</button>
             <button type="button" class="vt-btn" id="tab-besar" data-view="besar" role="tab" aria-selected="false" aria-controls="besar-view">Buku Besar</button>
             <button type="button" class="vt-btn" id="tab-analitik" data-view="analitik" role="tab" aria-selected="false" aria-controls="analytics-view">Analitik</button>
+            <button type="button" class="vt-btn" id="tab-dana" data-view="dana" role="tab" aria-selected="false" aria-controls="dana-view">Total Dana</button>
           </div>
 
           <div class="tool-filters" id="tools-catatan">
@@ -139,6 +154,15 @@
             <label class="field-inline">
               <span>Kategori</span>
               <select id="kategori-filter"><option value="">Semua</option></select>
+            </label>
+            <label class="field-inline">
+              <span>Dana</span>
+              <select id="dana-filter" title="Filter kategori dana">
+                <option value="">Semua</option>
+                <option value="operasional">Anggaran Operasional</option>
+                <option value="saving">Saving</option>
+                <option value="gabungan">Anggaran Gabungan</option>
+              </select>
             </label>
             <label class="field-inline search">
               <span class="sr-only">Cari</span>
@@ -222,6 +246,38 @@
                 <tbody id="tbody-besar"></tbody>
                 <tfoot><tr><td colspan="3">SALDO AKHIR</td><td class="c-amt" id="besar-tmasuk"></td><td class="c-amt" id="besar-tkeluar"></td><td class="c-amt" id="besar-saldo"></td></tr></tfoot>
               </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== TOTAL DANA ===== -->
+        <section class="dana-view hidden" id="dana-view" role="tabpanel" aria-labelledby="tab-dana">
+          <div class="panel dana-panel">
+            <div class="panel-head">
+              <h2>Total Dana</h2>
+              <span id="dana-book-name" class="muted"></span>
+            </div>
+            <div class="dana-body">
+              <p class="dana-lead">Saldo bersih tiap kategori: pemasukan dikurangi pengeluaran. <strong>Anggaran Gabungan</strong> adalah kategori tersendiri, bukan jumlah kategori lain. <strong>Total Seluruh Dana</strong> menjumlahkan ketiga saldo di bawah.</p>
+              <div class="dana-grid">
+                <article class="card">
+                  <span class="card-label">Saldo Anggaran Operasional</span>
+                  <span class="card-value" id="dana-operasional">Rp0</span>
+                </article>
+                <article class="card">
+                  <span class="card-label">Saldo Saving</span>
+                  <span class="card-value" id="dana-saving">Rp0</span>
+                </article>
+                <article class="card">
+                  <span class="card-label">Saldo Anggaran Gabungan</span>
+                  <span class="card-value" id="dana-gabungan">Rp0</span>
+                </article>
+                <article class="card card-balance dana-card-total">
+                  <span class="card-label">Total Seluruh Dana</span>
+                  <span class="card-value" id="dana-total">Rp0</span>
+                  <span class="card-hint">Operasional + Saving + Anggaran Gabungan. Bukan saldo Anggaran Gabungan.</span>
+                </article>
+              </div>
             </div>
           </div>
         </section>
@@ -331,6 +387,9 @@
           <input type="hidden" name="id" /><input type="hidden" name="type" />
           <label>Tanggal<input name="tanggal" type="date" required /></label>
           <label>Jumlah (Rp)<input name="jumlah" inputmode="numeric" autocomplete="off" placeholder="0" required /></label>
+          <label><span id="tx-dana-label">Kategori Dana</span>
+            <select name="dana" id="tx-dana" required></select>
+          </label>
           <label>Keterangan<input name="keterangan" maxlength="500" placeholder="mis. Pembayaran Domain Web" /></label>
           <label>Kategori (opsional)<input name="kategori" maxlength="100" list="kategori-list" placeholder="mis. Operasional" /><datalist id="kategori-list"></datalist></label>
           <label>Bukti (opsional) — foto struk/nota/transfer atau PDF
@@ -377,8 +436,9 @@
     <div id="import-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="import-modal-title">
       <div class="modal-box">
         <h3 id="import-modal-title">Impor dari CSV</h3>
-        <p class="muted">Unggah file CSV dengan kolom: <strong>Jenis, Tanggal, Jumlah, Keterangan, Kategori</strong>.
-          Jenis diisi <em>Pemasukan</em>/<em>Pengeluaran</em> (atau masuk/keluar). Tanggal format <em>YYYY-MM-DD</em>.</p>
+        <p class="muted">Unggah file CSV dengan kolom: <strong>Jenis, Tanggal, Jumlah, Keterangan, Kategori, Kategori Dana</strong>.
+          Jenis diisi <em>Pemasukan</em>/<em>Pengeluaran</em> (atau masuk/keluar). Tanggal format <em>YYYY-MM-DD</em>.
+          Kategori Dana: <em>Anggaran Operasional</em>, <em>Saving</em>, atau <em>Anggaran Gabungan</em>. Kolom ini boleh kosong — baris tanpa dana masuk ke Anggaran Operasional.</p>
         <p><button type="button" id="template-btn" class="btn btn-ghost btn-sm">Unduh template</button></p>
         <label class="file-drop">
           <input id="import-file" type="file" accept=".csv,text/csv" />
@@ -448,6 +508,14 @@
           <label>Ke Rekening<select name="to_book" required></select></label>
           <label>Tanggal<input name="tanggal" type="date" required /></label>
           <label>Jumlah (Rp)<input name="jumlah" inputmode="numeric" autocomplete="off" placeholder="0" required /></label>
+          <label>Kategori Dana
+            <select name="dana" required>
+              <option value="operasional">Anggaran Operasional</option>
+              <option value="saving">Saving</option>
+              <option value="gabungan">Anggaran Gabungan</option>
+            </select>
+          </label>
+          <p class="muted" style="margin:-6px 0 12px;font-size:12px">Keluar di rekening asal dan masuk di rekening tujuan memakai kategori dana yang sama.</p>
           <label>Keterangan (opsional)<input name="keterangan" maxlength="300" placeholder="mis. Isi ulang kas kecil" /></label>
           <p class="form-error" role="alert" id="transfer-error"></p>
           <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary">Transfer</button></div>

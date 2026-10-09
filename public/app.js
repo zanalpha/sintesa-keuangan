@@ -7,7 +7,7 @@
    ============================================================ */
 import { rupiah, BULAN_S, tanggalIndo, labelBulan, todayISO, escapeHtml, slug, csvCell, downloadBlob, isYearMonth, shiftMonth, monthsBetween } from './js/format.js';
 import { parseCsv, rowsToTransactions } from './js/csv.js';
-import { computeLedger } from './js/ledger.js';
+import { computeLedger, DANA, DANA_IDS, fundKey, danaChoices, fundBalances, inOperasionalGabungan } from './js/ledger.js';
 
 // ---------- Util (DOM) ----------
 const $ = (id) => document.getElementById(id);
@@ -93,12 +93,13 @@ const state = {
   allTransactions: [],    // semua transaksi lintas rekening (Analitik gabungan)
   month: null,            // null = belum diisi; diisi dari localStorage / bulan ini
   kategori: '',
+  dana: '',           // filter kategori dana: '' | operasional | saving | gabungan
   search: '',
   besarFrom: '',
   besarTo: '',
   anaScope: '',    // '' = gabungan semua rekening; atau id rekening tertentu
   taxMonth: '',    // YYYY-MM untuk ringkasan pajak (mengikuti bulan tampilan)
-  view: 'catatan', // 'catatan' | 'besar' | 'analitik'
+  view: 'catatan', // 'catatan' | 'besar' | 'analitik' | 'dana'
 };
 
 // ---------- Tema / densitas / profil cetak ----------
@@ -406,13 +407,25 @@ function defaultTanggalForNewTx() {
 // ============================================================
 //  RENDER
 // ============================================================
+function danaChip(t) {
+  const id = fundKey(t && t.dana);
+  const meta = DANA[id];
+  const title = t && t.type === 'keluar' ? meta.keluar : meta.masuk;
+  return `<span class="dana-chip dana-${id}" title="${escapeHtml(title)}">${escapeHtml(meta.name)}</span>`;
+}
+
 function visibleTx() {
   const q = state.search.trim().toLowerCase();
   const ym = isYearMonth(state.month) ? state.month : todayISO().slice(0, 7);
   return state.transactions.filter((t) => {
     if (t.tanggal.slice(0, 7) !== ym) return false;
     if (state.kategori && (t.kategori || '') !== state.kategori) return false;
-    if (q && !((t.keterangan || '').toLowerCase().includes(q) || (t.kategori || '').toLowerCase().includes(q))) return false;
+    if (state.dana && fundKey(t.dana) !== state.dana) return false;
+    if (q) {
+      const meta = DANA[fundKey(t.dana)];
+      const hay = [t.keterangan || '', t.kategori || '', meta.name, meta.masuk, meta.keluar].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
     return true;
   });
 }
@@ -428,10 +441,11 @@ function render() {
   const cardTx = state.view === 'catatan' ? visibleTx() : scopeTx;
   const totalMasuk = cardTx.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
   const totalKeluar = cardTx.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
-  const hasSoftFilter = !!(state.kategori || state.search.trim());
+  const hasSoftFilter = !!(state.kategori || state.dana || state.search.trim());
 
-  let saldoCard = bookSisa(book);
-  let lblSisa = 'Saldo Rekening';
+  const danaNow = fundBalances(state.transactions);
+  let saldoCard = danaNow.operasionalDanGabungan;
+  let lblSisa = 'Dana Operasional & Gabungan';
   let lblMasuk = 'Pemasukan (filter)';
   let lblKeluar = 'Pengeluaran (filter)';
   let caption = '';
@@ -439,13 +453,15 @@ function render() {
   if (state.view === 'catatan' && hasSoftFilter) {
     const bits = [];
     if (state.kategori) bits.push('kategori ' + state.kategori);
+    if (state.dana && DANA[state.dana]) bits.push('dana ' + DANA[state.dana].name);
     if (state.search.trim()) bits.push('pencarian');
-    caption = 'Masuk/keluar mengikuti ' + bits.join(' + ') + '. Saldo tetap penuh.';
+    caption = 'Masuk/keluar mengikuti ' + bits.join(' + ') + '. Dana Operasional & Gabungan tetap utuh (tanpa Saving).';
   }
 
   $('sum-masuk').textContent = rupiah(totalMasuk);
   $('sum-keluar').textContent = rupiah(totalKeluar);
   $('sum-sisa').textContent = rupiah(saldoCard);
+  $('sum-sisa').classList.toggle('is-neg', saldoCard < 0);
   const elLblM = $('lbl-masuk'), elLblK = $('lbl-keluar'), elLblS = $('lbl-sisa'), elCap = $('cards-caption');
   if (elLblM) elLblM.textContent = lblMasuk;
   if (elLblK) elLblK.textContent = lblKeluar;
@@ -469,6 +485,7 @@ function render() {
 
   if (state.view === 'besar') renderBukuBesar();
   if (state.view === 'analitik') renderAnalytics();
+  if (state.view === 'dana') renderTotalDana();
 }
 
 /** Saldo rekening dari saldo awal + seluruh transaksi (sumber kebenaran UI). */
@@ -487,10 +504,24 @@ function renderHomeDash() {
   if (elLabel) elLabel.textContent = labelBulan(ym);
 
   const book = curBook();
+  const bal = fundBalances(book ? state.transactions : []);
   const elSaldo = $('home-saldo');
-  if (elSaldo) elSaldo.textContent = rupiah(bookSisa(book));
+  if (elSaldo) {
+    elSaldo.textContent = rupiah(bal.operasionalDanGabungan);
+    elSaldo.classList.toggle('is-neg', bal.operasionalDanGabungan < 0);
+  }
+  const elOp = $('home-op');
+  const elGab = $('home-gab');
+  if (elOp) {
+    elOp.textContent = rupiah(bal.operasional);
+    elOp.classList.toggle('is-neg', bal.operasional < 0);
+  }
+  if (elGab) {
+    elGab.textContent = rupiah(bal.gabungan);
+    elGab.classList.toggle('is-neg', bal.gabungan < 0);
+  }
 
-  const tx = state.transactions.filter((t) => t.tanggal.slice(0, 7) === ym);
+  const tx = state.transactions.filter((t) => t.tanggal.slice(0, 7) === ym && inOperasionalGabungan(t));
   const masuk = tx.filter((t) => t.type === 'masuk').reduce((s, t) => s + t.jumlah, 0);
   const keluar = tx.filter((t) => t.type === 'keluar').reduce((s, t) => s + t.jumlah, 0);
   const net = masuk - keluar;
@@ -551,7 +582,7 @@ function renderColumn(type, list) {
         <td class="c-no">${i + 1}</td>
         <td class="c-date">${tanggalIndo(t.tanggal)}</td>
         <td class="c-amt">${rupiah(t.jumlah)}</td>
-        <td class="c-ket">${escapeHtml(t.keterangan) || '<span class="muted">—</span>'}${t.kategori ? ` <span class="muted">· ${escapeHtml(t.kategori)}</span>` : ''}${t.has_bukti ? ` <button type="button" class="bukti-chip" data-bukti="${t.id}" title="Lihat bukti">bukti</button>` : ''}</td>
+        <td class="c-ket">${danaChip(t)} ${escapeHtml(t.keterangan) || '<span class="muted">—</span>'}${t.kategori ? ` <span class="muted">· ${escapeHtml(t.kategori)}</span>` : ''}${t.has_bukti ? ` <button type="button" class="bukti-chip" data-bukti="${t.id}" title="Lihat bukti">bukti</button>` : ''}</td>
         <td class="c-act"><div class="row-actions">${isAdmin() ? `
           <button class="icon-btn" title="Ubah" aria-label="Ubah transaksi ${tanggalIndo(t.tanggal)} ${rupiah(t.jumlah)}" data-edit="${t.id}">Ubah</button>
           <button class="icon-btn" title="Hapus" aria-label="Hapus transaksi ${tanggalIndo(t.tanggal)} ${rupiah(t.jumlah)}" data-del="${t.id}">Hapus</button>` : ''}
@@ -581,7 +612,7 @@ function computeBesar() {
   const { besarFrom: from, besarTo: to } = state;
   const L = computeLedger(state.transactions, saldoAwal, from, to);
   const rows = L.rows.map((t) => ({
-    id: t.id, has_bukti: t.has_bukti, tanggal: t.tanggal, keterangan: t.keterangan, kategori: t.kategori,
+    id: t.id, has_bukti: t.has_bukti, tanggal: t.tanggal, keterangan: t.keterangan, kategori: t.kategori, dana: t.dana, type: t.type,
     masuk: t.type === 'masuk' ? t.jumlah : 0, keluar: t.type === 'keluar' ? t.jumlah : 0, saldo: t.saldo,
   }));
   return { saldoAwal, opening: L.opening, rows, tMasuk: L.tMasuk, tKeluar: L.tKeluar, saldoAkhir: L.saldoAkhir, from, to };
@@ -599,7 +630,7 @@ function renderBukuBesar() {
     html += `<tr class="empty-row"><td colspan="6">Belum ada transaksi pada rentang ini</td></tr>`;
   } else {
     d.rows.forEach((r, i) => {
-      const ket = escapeHtml(r.keterangan) + (r.kategori ? ` <span class="muted">· ${escapeHtml(r.kategori)}</span>` : '')
+      const ket = danaChip(r) + ' ' + (escapeHtml(r.keterangan) || '') + (r.kategori ? ` <span class="muted">· ${escapeHtml(r.kategori)}</span>` : '')
         + (r.has_bukti ? ` <button type="button" class="bukti-chip" data-bukti="${r.id}" title="Lihat bukti">bukti</button>` : '');
       html += `<tr>
         <td class="c-no">${i + 1}</td>
@@ -630,6 +661,7 @@ function setView(view) {
     ['ledger-view', 'catatan'],
     ['besar-view', 'besar'],
     ['analytics-view', 'analitik'],
+    ['dana-view', 'dana'],
   ];
   panels.forEach(([id, v]) => {
     const el = $(id);
@@ -747,6 +779,17 @@ function closeBukti() {
 // ============================================================
 //  MODAL TRANSAKSI
 // ============================================================
+function fillDanaSelect(type, tx) {
+  const sel = $('tx-dana');
+  const label = $('tx-dana-label');
+  if (!sel) return;
+  if (label) label.textContent = type === 'keluar' ? 'Sumber Dana' : 'Kategori Dana';
+  const blank = type === 'keluar' ? 'Pilih sumber dana' : 'Pilih kategori dana';
+  sel.innerHTML = `<option value="">${blank}</option>` +
+    danaChoices(type).map((c) => `<option value="${c.id}">${escapeHtml(c.label)}</option>`).join('');
+  sel.value = tx ? fundKey(tx.dana) : '';
+}
+
 function openTxModal(type, tx) {
   lastFocused = document.activeElement;
   const f = $('tx-form');
@@ -757,6 +800,7 @@ function openTxModal(type, tx) {
   f.id.value = tx ? tx.id : '';
   f.tanggal.value = tx ? tx.tanggal : defaultTanggalForNewTx();
   f.jumlah.value = tx ? new Intl.NumberFormat('id-ID').format(tx.jumlah) : '';
+  fillDanaSelect(type, tx);
   f.keterangan.value = tx ? tx.keterangan : '';
   f.kategori.value = tx ? tx.kategori : '';
   buktiState = { data: null, changed: false, hasExisting: !!(tx && tx.has_bukti), txId: tx ? tx.id : null };
@@ -802,8 +846,13 @@ $('tx-form').addEventListener('submit', async (e) => {
     type: f.type.value, tanggal: f.tanggal.value,
     jumlah: f.jumlah.value.replace(/\D/g, ''),
     keterangan: f.keterangan.value, kategori: f.kategori.value,
+    dana: f.dana.value,
   };
   if (!payload.jumlah) { $('tx-error').textContent = 'Jumlah wajib diisi.'; return; }
+  if (!DANA_IDS.includes(payload.dana)) {
+    $('tx-error').textContent = payload.type === 'keluar' ? 'Sumber dana wajib dipilih.' : 'Kategori dana wajib dipilih.';
+    return;
+  }
   // Sertakan "bukti" hanya bila diubah (data URL baru, atau null bila dihapus).
   if (buktiState.changed) payload.bukti = buktiState.data;
 
@@ -1029,6 +1078,7 @@ $('transfer-form').addEventListener('submit', async (e) => {
   const payload = {
     from_book: Number(f.from_book.value), to_book: Number(f.to_book.value),
     tanggal: f.tanggal.value, jumlah: f.jumlah.value.replace(/\D/g, ''), keterangan: f.keterangan.value,
+    dana: f.dana.value,
   };
   if (!payload.jumlah) { $('transfer-error').textContent = 'Jumlah wajib diisi.'; return; }
   withSubmitLock(f, 'Menyimpan…', async () => {
@@ -1186,35 +1236,109 @@ $('import-file').addEventListener('change', async (e) => {
   } catch (err) { $('import-result').textContent = ''; $('import-error').textContent = err.message; }
 });
 function downloadTemplate() {
-  const csv = 'Jenis,Tanggal,Jumlah,Keterangan,Kategori\r\nPemasukan,2026-07-01,8000000,Contoh pemasukan,Proyek\r\nPengeluaran,2026-07-02,1100000,Contoh pengeluaran,Operasional\r\n';
+  const csv = 'Jenis,Tanggal,Jumlah,Keterangan,Kategori,Kategori Dana\r\nPemasukan,2026-07-01,8000000,Contoh pemasukan,Proyek,Pemasukan Anggaran Operasional\r\nPengeluaran,2026-07-02,1100000,Contoh pengeluaran,Operasional,Pengeluaran Anggaran Operasional\r\n';
   downloadBlob('﻿' + csv, 'template-impor-kas.csv');
 }
 
 // ============================================================
 //  EKSPOR & CETAK
 // ============================================================
+function renderTotalDana() {
+  const book = curBook();
+  const nameEl = $('dana-book-name');
+  if (nameEl) nameEl.textContent = book ? book.name : '';
+  const bal = fundBalances(state.transactions);
+  const set = (id, n) => {
+    const el = $(id);
+    if (!el) return;
+    el.textContent = rupiah(n);
+    el.classList.toggle('is-neg', n < 0);
+  };
+  set('dana-operasional', bal.operasional);
+  set('dana-saving', bal.saving);
+  set('dana-gabungan', bal.gabungan);
+  set('dana-total', bal.total);
+}
+
 function exportCsv() {
   const book = curBook();
   const name = slug(book ? book.name : 'buku');
+  if (state.view === 'dana') {
+    const b = fundBalances(state.transactions);
+    const lines = [
+      ['Kategori Dana', 'Saldo'],
+      ['Saldo Anggaran Operasional', b.operasional],
+      ['Saldo Saving', b.saving],
+      ['Saldo Anggaran Gabungan', b.gabungan],
+      ['Total Seluruh Dana', b.total],
+    ].map((row) => row.map(csvCell).join(','));
+    return downloadBlob('﻿' + lines.join('\r\n'), `total-dana-${name}.csv`);
+  }
   if (state.view === 'besar') {
     const d = computeBesar();
-    const lines = [['Tanggal', 'Keterangan', 'Kategori', 'Masuk', 'Keluar', 'Saldo'].join(',')];
-    lines.push(['', d.from ? `Saldo Awal per ${d.from}` : 'Saldo Awal', '', '', '', d.opening].map(csvCell).join(','));
-    for (const r of d.rows) lines.push([r.tanggal, r.keterangan, r.kategori, r.masuk || '', r.keluar || '', r.saldo].map(csvCell).join(','));
-    lines.push(['', 'SALDO AKHIR', '', d.tMasuk, d.tKeluar, d.saldoAkhir].map(csvCell).join(','));
+    const lines = [['Tanggal', 'Keterangan', 'Kategori', 'Kategori Dana', 'Masuk', 'Keluar', 'Saldo'].join(',')];
+    lines.push(['', d.from ? `Saldo Awal per ${d.from}` : 'Saldo Awal', '', '', '', '', d.opening].map(csvCell).join(','));
+    for (const r of d.rows) lines.push([r.tanggal, r.keterangan, r.kategori, DANA[fundKey(r.dana)].name, r.masuk || '', r.keluar || '', r.saldo].map(csvCell).join(','));
+    lines.push(['', 'SALDO AKHIR', '', '', d.tMasuk, d.tKeluar, d.saldoAkhir].map(csvCell).join(','));
     return downloadBlob('﻿' + lines.join('\r\n'), `bukubesar-${name}.csv`);
   }
   const rows = visibleTx();
   if (rows.length === 0) return toast('Tidak ada data untuk diekspor.', true);
-  const lines = [['Jenis', 'Tanggal', 'Jumlah', 'Keterangan', 'Kategori'].join(',')];
-  for (const t of rows) lines.push([t.type === 'masuk' ? 'Pemasukan' : 'Pengeluaran', t.tanggal, t.jumlah, t.keterangan, t.kategori].map(csvCell).join(','));
+  const lines = [['Jenis', 'Tanggal', 'Jumlah', 'Keterangan', 'Kategori', 'Kategori Dana'].join(',')];
+  for (const t of rows) {
+    const meta = DANA[fundKey(t.dana)];
+    const danaLabel = t.type === 'keluar' ? meta.keluar : meta.masuk;
+    lines.push([t.type === 'masuk' ? 'Pemasukan' : 'Pengeluaran', t.tanggal, t.jumlah, t.keterangan, t.kategori, danaLabel].map(csvCell).join(','));
+  }
   downloadBlob('﻿' + lines.join('\r\n'), `kas-${name}-${state.month || todayISO().slice(0, 7)}.csv`);
 }
 
 // ============================================================
 //  LAPORAN CETAK / PDF — dokumen resmi lengkap
 // ============================================================
+function buildDanaPrint() {
+  const company = loadCompany();
+  const book = curBook();
+  const bal = fundBalances(state.transactions);
+  const cetakTgl = tanggalIndo(todayISO());
+  const docNo = `SDS/TD/${todayISO().replace(/-/g, '')}`;
+  const coAddr = company.address ? `<div class="pr-co-addr">${escapeHtml(company.address)}</div>` : '';
+  const coNpwp = company.npwp ? `<div class="pr-co-npwp">NPWP: ${escapeHtml(company.npwp)}</div>` : '';
+  const row = (label, n, extra) =>
+    `<tr${extra ? ' class="total"' : ''}><td>${label}</td><td class="num">${rupiah(n)}</td></tr>`;
+  $('print-report').innerHTML = `
+    <header class="pr-head">
+      <div class="pr-brand">
+        <img class="pr-mark" src="/logo.svg" alt="Logo" width="44" height="44" />
+        <div>
+          <div class="pr-co-name">${escapeHtml(company.name || 'PT SINTESA DATA SEMESTA').toUpperCase()}</div>
+          <div class="pr-co-sub">Sistem Pencatatan Keuangan</div>
+          ${coAddr}${coNpwp}
+        </div>
+      </div>
+      <div class="pr-docmeta">
+        <div>No. Dokumen: <b>${docNo}</b></div>
+        <div>Tanggal Cetak: <b>${cetakTgl}</b></div>
+      </div>
+    </header>
+    <div class="pr-title">Total Dana</div>
+    <div class="pr-subtitle">${escapeHtml(book ? book.name : '—')}</div>
+    <p>Saldo bersih = pemasukan dikurangi pengeluaran pada kategori yang sama. Anggaran Gabungan bukan penjumlahan kategori lain. Total Seluruh Dana = Operasional + Saving + Anggaran Gabungan.</p>
+    <table class="pr-bd-table">
+      <tbody>
+        ${row('Saldo Anggaran Operasional', bal.operasional)}
+        ${row('Saldo Saving', bal.saving)}
+        ${row('Saldo Anggaran Gabungan', bal.gabungan)}
+        ${row('Total Seluruh Dana', bal.total, true)}
+      </tbody>
+    </table>`;
+}
+
 function buildPrintReport() {
+  if (state.view === 'dana') {
+    buildDanaPrint();
+    return;
+  }
   const analitik = state.view === 'analitik';
   const company = loadCompany();
   const scopeBook = analitik ? (anaScopeId() ? state.books.find((b) => b.id === anaScopeId()) : null) : curBook();
@@ -1242,6 +1366,7 @@ function buildPrintReport() {
   if (state.view === 'catatan') {
     const fl = [];
     if (state.kategori) fl.push(`kategori "${state.kategori}"`);
+    if (state.dana && DANA[state.dana]) fl.push(`dana "${DANA[state.dana].name}"`);
     if (state.search) fl.push(`pencarian "${state.search}"`);
     if (fl.length) filterNote = `Filter layar (${fl.join(', ')}) tidak diterapkan; laporan mencakup seluruh transaksi periode.`;
   }
@@ -1374,15 +1499,16 @@ function buildPrintReport() {
   }
 
   const openLabel = from ? `Saldo awal per ${tanggalIndo(from)}` : 'SALDO AWAL';
-  let ledgerBody = `<tr class="opening"><td class="c-no"></td><td>—</td><td colspan="2">${openLabel}</td><td class="num"></td><td class="num"></td><td class="num">${rupiah(L.opening)}</td></tr>`;
+  let ledgerBody = `<tr class="opening"><td class="c-no"></td><td>—</td><td colspan="3">${openLabel}</td><td class="num"></td><td class="num"></td><td class="num">${rupiah(L.opening)}</td></tr>`;
   if (L.rows.length === 0) {
-    ledgerBody += `<tr><td colspan="7" class="pr-empty">Tidak ada transaksi pada periode ini.</td></tr>`;
+    ledgerBody += `<tr><td colspan="8" class="pr-empty">Tidak ada transaksi pada periode ini.</td></tr>`;
   } else {
     ledgerBody += L.rows.map((r, i) => `<tr>
       <td class="c-no">${i + 1}</td>
       <td>${tanggalIndo(r.tanggal)}</td>
       <td>${escapeHtml(r.keterangan) || '—'}</td>
       <td>${escapeHtml(r.kategori) || '—'}</td>
+      <td>${escapeHtml(DANA[fundKey(r.dana)].name)}</td>
       <td class="num r-in">${r.type === 'masuk' ? rupiah(r.jumlah) : ''}</td>
       <td class="num r-out">${r.type === 'keluar' ? rupiah(r.jumlah) : ''}</td>
       <td class="num">${rupiah(r.saldo)}</td></tr>`).join('');
@@ -1391,12 +1517,12 @@ function buildPrintReport() {
   $('print-report').innerHTML = kop + `
     <table class="pr-ledger">
       <thead><tr>
-        <th class="c-no">No</th><th>Tanggal</th><th>Keterangan</th><th>Kategori</th>
+        <th class="c-no">No</th><th>Tanggal</th><th>Keterangan</th><th>Kategori</th><th>Dana</th>
         <th class="num">Pemasukan</th><th class="num">Pengeluaran</th><th class="num">Saldo</th>
       </tr></thead>
       <tbody>${ledgerBody}</tbody>
       <tfoot><tr>
-        <td colspan="4">TOTAL</td>
+        <td colspan="5">TOTAL</td>
         <td class="num">${rupiah(L.tMasuk)}</td>
         <td class="num">${rupiah(L.tKeluar)}</td>
         <td class="num">${rupiah(L.saldoAkhir)}</td>
@@ -1524,6 +1650,7 @@ function wireStaticHandlers() {
     });
   }
   $('kategori-filter').addEventListener('change', (e) => { state.kategori = e.target.value; render(); });
+  $('dana-filter').addEventListener('change', (e) => { state.dana = e.target.value; render(); });
   let searchTimer;
   $('search-input').addEventListener('input', (e) => {
     state.search = e.target.value;

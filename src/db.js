@@ -112,7 +112,7 @@ async function run(statements) {
 }
 
 // Versi skema saat ini. Naikkan bila menambah langkah migrasi baru.
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 /** Membuat tabel bila belum ada. Aman dipanggil berulang kali. */
 async function migrate() {
@@ -175,6 +175,14 @@ async function migrate() {
   await addColumn('users', "role TEXT NOT NULL DEFAULT 'admin'", 'role'); // 'admin' | 'viewer'
   // Epoch sesi: dinaikkan saat ganti password untuk mencabut sesi lama (di perangkat lain).
   await addColumn('users', 'session_epoch INTEGER NOT NULL DEFAULT 0', 'session_epoch');
+  // Kategori dana: operasional | saving | gabungan. Satu transaksi, satu kategori.
+  // Transaksi lama (kolom kosong) diisi operasional agar saldo yang sudah tercatat tetap utuh.
+  await addColumn('transactions', "dana TEXT NOT NULL DEFAULT ''", 'dana');
+  try {
+    await query("UPDATE transactions SET dana = 'operasional' WHERE dana = ''");
+  } catch (e) {
+    console.warn('[db] Pengisian kategori dana transaksi lama gagal:', e.message);
+  }
 
   // Integritas tingkat DB: ubah tanggal TEXT -> DATE (Postgres akan menolak tanggal mustahil).
   // Nilai lama 'YYYY-MM-DD' di-cast mulus; type parser 1082 menjaga hasilnya tetap string.

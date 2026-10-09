@@ -91,24 +91,24 @@ test('lockout per-akun setelah percobaan gagal beruntun', async () => {
 test('buat rekening & transaksi, saldo terhitung', async () => {
   let r = await req('POST', '/api/books', { cookie: adminCookie, body: { name: 'BCA', saldo_awal: 1000000 } });
   assert.equal(r.status, 201);
-  r = await req('POST', '/api/books/1/transactions', { cookie: adminCookie, body: { type: 'masuk', tanggal: '2026-07-01', jumlah: 5000000 } });
+  r = await req('POST', '/api/books/1/transactions', { cookie: adminCookie, body: { type: 'masuk', tanggal: '2026-07-01', jumlah: 5000000, dana: 'operasional' } });
   assert.equal(r.status, 201);
   r = await req('GET', '/api/books', { cookie: adminCookie });
   assert.equal(r.json.books[0].sisa, 6000000);
 });
 
 test('tanggal kalender mustahil ditolak', async () => {
-  const r = await req('POST', '/api/books/1/transactions', { cookie: adminCookie, body: { type: 'keluar', tanggal: '2026-02-30', jumlah: 1000 } });
+  const r = await req('POST', '/api/books/1/transactions', { cookie: adminCookie, body: { type: 'keluar', tanggal: '2026-02-30', jumlah: 1000, dana: 'operasional' } });
   assert.equal(r.status, 400);
 });
 
 test('bukti format salah ditolak', async () => {
-  const r = await req('POST', '/api/books/1/transactions', { cookie: adminCookie, body: { type: 'keluar', tanggal: '2026-07-02', jumlah: 1000, bukti: 'data:image/png;base64,not*valid' } });
+  const r = await req('POST', '/api/books/1/transactions', { cookie: adminCookie, body: { type: 'keluar', tanggal: '2026-07-02', jumlah: 1000, dana: 'operasional', bukti: 'data:image/png;base64,not*valid' } });
   assert.equal(r.status, 400);
 });
 
 test('soft-delete menyembunyikan transaksi dari daftar', async () => {
-  let r = await req('POST', '/api/books/1/transactions', { cookie: adminCookie, body: { type: 'keluar', tanggal: '2026-07-03', jumlah: 200000 } });
+  let r = await req('POST', '/api/books/1/transactions', { cookie: adminCookie, body: { type: 'keluar', tanggal: '2026-07-03', jumlah: 200000, dana: 'operasional' } });
   const id = r.json.transaction.id;
   r = await req('DELETE', `/api/transactions/${id}`, { cookie: adminCookie });
   assert.equal(r.status, 200);
@@ -196,7 +196,7 @@ test('hapus bulan: viewer ditolak, format invalid ditolak, admin hard-delete OK'
   // Siapkan transaksi Agustus (bulan yang akan dihapus) — Juli sudah ada dari tes sebelumnya.
   let r = await req('POST', '/api/books/1/transactions', {
     cookie: adminCookie,
-    body: { type: 'masuk', tanggal: '2026-08-10', jumlah: 777000, keterangan: 'tes-purge-aug' },
+    body: { type: 'masuk', tanggal: '2026-08-10', jumlah: 777000, keterangan: 'tes-purge-aug', dana: 'operasional' },
   });
   assert.equal(r.status, 201);
   const augId = r.json.transaction.id;
@@ -231,4 +231,83 @@ test('hapus bulan: viewer ditolak, format invalid ditolak, admin hard-delete OK'
   // Audit mencatat aksi purge.
   r = await req('GET', '/api/auth/audit', { cookie: adminCookie });
   assert.ok(r.json.events.some((ev) => ev.action === 'purge' && /2026-08/.test(ev.detail || '')));
+});
+
+test('kategori dana: wajib, satu kategori per transaksi, saldo tidak dijumlahkan ganda', async () => {
+  const { fundBalances } = await import('../public/js/ledger.js');
+  let r = await req('POST', '/api/books', { cookie: adminCookie, body: { name: 'Dana Uji', saldo_awal: 500000 } });
+  assert.equal(r.status, 201);
+  const bookId = r.json.book.id;
+
+  r = await req('POST', `/api/books/${bookId}/transactions`, {
+    cookie: adminCookie,
+    body: { type: 'masuk', tanggal: '2026-09-01', jumlah: 100000 },
+  });
+  assert.equal(r.status, 400);
+  assert.match(r.json.error, /dana/i);
+
+  r = await req('POST', `/api/books/${bookId}/transactions`, {
+    cookie: adminCookie,
+    body: { type: 'masuk', tanggal: '2026-09-01', jumlah: 100000, dana: 'setengah-setengah' },
+  });
+  assert.equal(r.status, 400);
+
+  const created = [];
+  const seed = [
+    { type: 'masuk', jumlah: 100000, dana: 'operasional' },
+    { type: 'masuk', jumlah: 40000, dana: 'saving' },
+    { type: 'masuk', jumlah: 25000, dana: 'gabungan' },
+    { type: 'keluar', jumlah: 10000, dana: 'operasional' },
+    { type: 'keluar', jumlah: 5000, dana: 'gabungan' },
+  ];
+  for (const item of seed) {
+    r = await req('POST', `/api/books/${bookId}/transactions`, {
+      cookie: adminCookie,
+      body: { type: item.type, tanggal: '2026-09-02', jumlah: item.jumlah, dana: item.dana, keterangan: item.dana },
+    });
+    assert.equal(r.status, 201);
+    assert.equal(r.json.transaction.dana, item.dana);
+    assert.equal(r.json.transaction.jumlah, item.jumlah);
+    created.push(r.json.transaction);
+  }
+
+  r = await req('GET', `/api/books/${bookId}/transactions`, { cookie: adminCookie });
+  assert.equal(r.status, 200);
+  const txs = r.json.transactions;
+  assert.equal(txs.length, 5);
+  const bal = fundBalances(txs);
+  assert.equal(bal.operasional, 90000);
+  assert.equal(bal.saving, 40000);
+  assert.equal(bal.gabungan, 20000);
+  assert.equal(bal.operasionalDanGabungan, 110000);
+  assert.equal(bal.total, 150000);
+  assert.notEqual(bal.gabungan, bal.operasional + bal.saving);
+
+  const books = (await req('GET', '/api/books', { cookie: adminCookie })).json.books;
+  const book = books.find((b) => b.id === bookId);
+  assert.equal(book.sisa, 650000);
+
+  const saving = created.find((t) => t.dana === 'saving');
+  r = await req('PATCH', `/api/transactions/${saving.id}`, {
+    cookie: adminCookie,
+    body: { type: 'masuk', tanggal: '2026-09-02', jumlah: 40000, keterangan: 'pindah', kategori: '', dana: 'gabungan' },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.transaction.dana, 'gabungan');
+
+  r = await req('GET', `/api/books/${bookId}/transactions`, { cookie: adminCookie });
+  const afterEdit = fundBalances(r.json.transactions);
+  assert.equal(afterEdit.saving, 0);
+  assert.equal(afterEdit.gabungan, 60000);
+  assert.equal(afterEdit.operasional, 90000);
+  assert.equal(afterEdit.total, 150000);
+
+  const keluarOp = created.find((t) => t.type === 'keluar' && t.dana === 'operasional');
+  r = await req('DELETE', `/api/transactions/${keluarOp.id}`, { cookie: adminCookie });
+  assert.equal(r.status, 200);
+  r = await req('GET', `/api/books/${bookId}/transactions`, { cookie: adminCookie });
+  const afterDel = fundBalances(r.json.transactions);
+  assert.equal(afterDel.operasional, 100000);
+  assert.equal(afterDel.total, 160000);
+  assert.equal(r.json.transactions.length, 4);
 });

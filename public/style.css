@@ -682,20 +682,57 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   gap: 10px; margin-bottom: 12px;
 }
 .home-balance {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
-  padding: 14px 16px; margin-bottom: 12px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 14px 16px; margin-bottom: 8px;
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--teal) 14%, var(--panel-2)), var(--panel-2));
   border: 1px solid color-mix(in srgb, var(--teal) 32%, var(--line-soft));
   border-radius: 12px;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
 }
+.home-balance-copy { display: flex; flex-direction: column; gap: 3px; min-width: 12rem; flex: 1; }
 .home-balance-label {
   font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .7px; color: var(--muted);
 }
+.home-balance-sub { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0; line-height: 1.35; }
 .home-balance-value {
   font-family: var(--mono); font-weight: 700; font-size: clamp(20px, 2.8vw, 28px);
   letter-spacing: -.5px; color: var(--teal); overflow-wrap: anywhere; line-height: 1.15;
+}
+.home-balance-value.is-neg, .home-fund-value.is-neg, .card-value.is-neg { color: var(--out); }
+.home-fund-split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.home-fund {
+  background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+  padding: 8px 12px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0;
+}
+.home-fund-label {
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .45px; color: var(--muted);
+}
+.home-fund-value {
+  font-family: var(--mono); font-weight: 700; font-size: 14px; letter-spacing: -.2px; color: var(--ink);
+  overflow-wrap: anywhere; text-align: right;
+}
+.home-scope { margin: 0 0 10px; font-size: 12px; line-height: 1.4; color: var(--muted); }
+.dana-chip {
+  display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px;
+  font-size: 10px; font-weight: 800; letter-spacing: .15px; line-height: 1.7;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--muted);
+  white-space: nowrap; vertical-align: baseline;
+}
+.dana-chip.dana-operasional { color: var(--teal); border-color: color-mix(in srgb, var(--teal) 40%, var(--line)); }
+.dana-chip.dana-saving { color: var(--gold-dim); border-color: color-mix(in srgb, var(--gold) 50%, var(--line)); background: color-mix(in srgb, var(--gold) 12%, var(--panel-2)); }
+.dana-chip.dana-gabungan { color: var(--brand-2); border-color: color-mix(in srgb, var(--brand-2) 45%, var(--line)); }
+.dana-view { margin-bottom: 14px; }
+.dana-panel { overflow: visible; }
+.dana-body { padding: 14px 16px 16px; }
+.dana-lead { margin: 0 0 14px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.dana-lead strong { color: var(--ink); font-weight: 800; }
+.dana-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.dana-card-total { grid-column: 1 / -1; }
+.card-hint { font-size: 12px; color: var(--muted); font-weight: 600; line-height: 1.4; }
+@media (max-width: 720px) {
+  .home-fund-split, .dana-grid { grid-template-columns: 1fr; }
+  .view-toggle { flex-wrap: wrap; }
 }
 .home-dash-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
 .home-stat {
