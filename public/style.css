@@ -836,6 +836,42 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   .icon-btn { min-height: 44px; min-width: 44px; }
 }
 
+/* Ponsel: filter dan ringkasan selebar layar. Komputer: area kerja lebih longgar. */
+@media (max-width: 720px) {
+  .container { padding: 12px 12px calc(124px + env(safe-area-inset-bottom)); }
+  .topbar { padding: max(10px, env(safe-area-inset-top)) 12px 10px; }
+  .home-dash { padding: 12px; }
+  .home-dash-tools { width: 100%; justify-content: space-between; }
+  .home-scope-pick { flex: 1; min-width: 0; }
+  .home-scope-pick select { width: 100%; max-width: none; min-height: 40px; font-size: 16px; }
+  .home-dash-month { max-width: none; }
+  .home-balance { flex-direction: column; align-items: flex-start; }
+  .home-balance-copy { min-width: 0; }
+  .view-toggle { width: 100%; display: flex; flex-wrap: wrap; }
+  .vt-btn { flex: 1 1 46%; padding: 10px 8px; }
+  .tool-filters { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
+  .field-inline, .field-inline.search { width: 100%; min-width: 0; }
+  .field-inline.search { grid-column: 1 / -1; }
+  .field-inline select, .field-inline input,
+  .tool-filters input, .tool-filters select,
+  .field-inline.search input { width: 100%; max-width: none; min-width: 0; font-size: 16px; }
+  .toolbar-right { margin-left: 0; }
+  .mobile-fab { right: max(12px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); }
+  .modal:not(.modal-tx) { align-items: flex-end; padding: 0; }
+  .modal:not(.modal-tx) .modal-box {
+    max-width: none; border-radius: 16px 16px 0 0; max-height: 88vh;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  }
+}
+@media (max-width: 420px) {
+  .tool-filters, .home-dash-stats { grid-template-columns: 1fr; }
+}
+@media (min-width: 1100px) {
+  .container { max-width: 1180px; padding: 22px 28px 80px; }
+  .home-dash { padding: 20px 22px; }
+  .table-wrap { max-height: min(68vh, 680px); }
+}
+
 /* ============================================================
    LAPORAN CETAK / PDF — dokumen resmi, dibangun oleh buildPrintReport().
    Seluruh UI aplikasi disembunyikan; hanya #print-report yang tampil.
