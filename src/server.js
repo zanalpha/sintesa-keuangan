@@ -26,7 +26,7 @@ if (isProd) {
       .status(503)
       .type('html')
       .send(
-        '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tidak tersedia</title><p style="font-family:sans-serif">Layanan keuangan sedang dinonaktifkan sementara.</p>'
+        '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gagal terhubung</title><p style="font-family:sans-serif">Gagal terhubung ke server.</p>'
       );
   });
 }
