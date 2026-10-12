@@ -9,8 +9,7 @@ name: Keep-alive (cegah cold start)
 # GitHub juga menonaktifkan schedule bila repo tak ada aktivitas selama 60 hari.
 
 on:
-  schedule:
-    - cron: '*/10 * * * *' # tiap 10 menit
+  # Jadwal dimatikan sementara selama situs offline. Nyalakan lagi bersama server.
   workflow_dispatch: {} # tombol jalankan manual
 
 # Bila satu run masih berjalan, batalkan yang lama agar tak menumpuk.

@@ -17,6 +17,20 @@ const isProd = process.env.NODE_ENV === 'production';
 app.disable('x-powered-by');
 app.set('trust proxy', 1); // penting di Render agar secure cookie & req.ip benar
 
+// Situs produksi ditutup sementara. /healthz tetap 200 agar Render tidak mengembalikan versi lama.
+// Hapus blok ini saat diminta online lagi.
+if (isProd) {
+  app.use((req, res, next) => {
+    if (req.path === '/healthz') return next();
+    res
+      .status(503)
+      .type('html')
+      .send(
+        '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tidak tersedia</title><p style="font-family:sans-serif">Layanan keuangan sedang dinonaktifkan sementara.</p>'
+      );
+  });
+}
+
 // Log ringkas per-request API (timestamp, metode, path, status, durasi) — bisa dicari di log Render.
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api')) return next();
